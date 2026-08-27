@@ -1,5 +1,5 @@
 #!/bin/bash
-# Portable LLM launcher — Linux (x86_64, CPU build)
+# Portable LLM launcher — Linux (x86_64, CPU build), router mode.
 set -uo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,34 +20,49 @@ fi
 
 RAM=$(( $(awk '/MemTotal/{print $2}' /proc/meminfo) * 1024 ))
 RAM_GB=$((RAM / 1024 / 1024 / 1024))
-# Budget = min(70% of RAM, RAM - 4GB). The percentage alone starves big
-# machines (a 32GB box would skip a 20GB model by 0.8GB); the absolute floor
-# alone lets an 8GB box load a 5GB model with 3GB left for the OS. Both bound.
-B_PCT=$((RAM * 7 / 10))
-B_ABS=$((RAM - 4 * 1024 * 1024 * 1024))
+B_PCT=$((RAM * 7 / 10)); B_ABS=$((RAM - 4 * 1024 * 1024 * 1024))
 BUDGET=$(( B_PCT < B_ABS ? B_PCT : B_ABS ))
 
-BEST=""; BEST_SZ=0
 shopt -s nullglob
-for f in "$MODELS"/*.gguf; do
-  sz=$(stat -c%s "$f")
-  if [ "$sz" -le "$BUDGET" ] && [ "$sz" -gt "$BEST_SZ" ]; then BEST="$f"; BEST_SZ=$sz; fi
-done
+FILES=("$MODELS"/*.gguf)
 shopt -u nullglob
-
-[ -n "$BEST" ] || { echo "  ✗ No model fits in ${RAM_GB}GB of RAM."; echo
+[ ${#FILES[@]} -gt 0 ] || { echo "  ✗ No .gguf files in $MODELS"; echo
   read -r -p "  Press Return to close."; exit 1; }
+
+# See run-mac.command: --models-max default of 4 is fatal on small machines.
+FITTING=0; SUM=0; MAXN=0
+while read -r sz; do
+  [ "$sz" -le "$BUDGET" ] || continue
+  FITTING=$((FITTING + 1))
+  if [ $((SUM + sz)) -le "$BUDGET" ]; then SUM=$((SUM + sz)); MAXN=$((MAXN + 1)); fi
+done < <(for f in "${FILES[@]}"; do stat -c%s "$f"; done | sort -nr)
+
+[ "$FITTING" -gt 0 ] || { echo "  ✗ No model fits in ${RAM_GB}GB of RAM."; echo
+  read -r -p "  Press Return to close."; exit 1; }
+[ "$MAXN" -ge 1 ] || MAXN=1
+
+{
+  printf '{"ramBytes":%s,"budgetBytes":%s,"modelsMax":%s,"models":{' "$RAM" "$BUDGET" "$MAXN"
+  sep=""
+  for f in "${FILES[@]}"; do
+    n=$(basename "$f" .gguf); sz=$(stat -c%s "$f")
+    fits=$([ "$sz" -le "$BUDGET" ] && echo true || echo false)
+    printf '%s"%s":{"bytes":%s,"fits":%s}' "$sep" "$n" "$sz" "$fits"; sep=","
+  done
+  printf '}}\n'
+} > "$UI/machine.json" 2>/dev/null || echo "  (note: manifest not writable — UI will offer all models)"
 
 PORT=8080
 while ss -ltn 2>/dev/null | grep -q ":$PORT " ; do PORT=$((PORT+1)); done
 
 echo "  Machine : ${RAM_GB}GB RAM · CPU inference"
-echo "  Model   : $(basename "$BEST") ($((BEST_SZ/1024/1024/1024))GB)"
+echo "  Models  : ${FITTING} of ${#FILES[@]} usable, up to ${MAXN} loaded at once"
 echo "  Address : http://127.0.0.1:$PORT"
 echo "  ─────────────────────────────────────────"; echo
 
-"$BIN" -m "$BEST" --host 127.0.0.1 --port "$PORT" --path "$UI" \
-       -c "$CTX" -t "$(nproc)" --no-warmup --cors-origins localhost > "$DIR/logs/server.log" 2>&1 &
+"$BIN" --models-dir "$MODELS" --host 127.0.0.1 --port "$PORT" --path "$UI" \
+       -c "$CTX" -t "$(nproc)" --models-max "$MAXN" \
+       --cors-origins localhost --no-warmup > "$DIR/logs/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID 2>/dev/null; wait $PID 2>/dev/null' EXIT INT TERM
 

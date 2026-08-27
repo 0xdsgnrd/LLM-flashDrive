@@ -5,6 +5,7 @@ const $ = (id) => document.getElementById(id);
 const msgs = $('messages');
 let history = [];
 let controller = null;
+let currentModel = null;      // null => let the server choose
 
 /* ---------- rendering ---------- */
 
@@ -77,9 +78,8 @@ async function probe() {
   try {
     const r = await fetch('/v1/models');
     if (!r.ok) throw new Error(r.status);
-    const name = (await r.json()).data?.[0]?.id ?? 'loaded';
-    $('model-name').textContent = name.replace(/\.gguf$/i, '').split(/[\\/]/).pop();
-    $('model-name').title = name;
+    const models = (await r.json()).data ?? [];
+    await populateModels(models.map((m) => m.id));
     $('status').textContent = 'ready';
     $('status').className = 'on';
     return true;
@@ -88,6 +88,54 @@ async function probe() {
     $('status').className = 'off';
     return false;
   }
+}
+
+// The launcher writes machine.json describing what THIS machine can run.
+// Router mode serves every model in models/, including ones too large for the
+// host, so without this a 16GB laptop would be offered a 32B and fail on pick.
+// Absent or unreadable manifest => offer everything (fail open, not closed).
+let manifest = null;
+async function loadManifest() {
+  if (manifest !== null) return manifest;
+  try {
+    const r = await fetch('machine.json', { cache: 'no-store' });
+    manifest = r.ok ? await r.json() : {};
+  } catch { manifest = {}; }
+  return manifest;
+}
+
+const prettyBytes = (b) =>
+  b >= 1 << 30 ? (b / (1 << 30)).toFixed(1) + 'GB' : Math.round(b / (1 << 20)) + 'MB';
+
+async function populateModels(ids) {
+  const sel = $('model-select');
+  const signature = ids.join('|');
+  if (sel.dataset.signature === signature) return;   // no churn while streaming
+
+  const info = (await loadManifest()).models ?? {};
+  const saved = (() => { try { return localStorage.getItem('portable-llm-model'); } catch { return null; } })();
+
+  sel.innerHTML = '';
+  let firstUsable = null;
+  for (const id of ids) {
+    const meta = info[id];
+    const fits = !meta || meta.fits !== false;       // unknown => assume usable
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = meta ? `${id}  (${prettyBytes(meta.bytes)})` : id;
+    if (!fits) { opt.disabled = true; opt.textContent += '  — too large'; }
+    else if (firstUsable === null) firstUsable = id;
+    sel.appendChild(opt);
+  }
+
+  const savedUsable = saved && ids.includes(saved) && info[saved]?.fits !== false;
+  currentModel = savedUsable ? saved : firstUsable;
+  if (currentModel) sel.value = currentModel;
+
+  // Claim the signature only AFTER the options exist. Setting it before the
+  // await meant a failed or still-pending build would make every later probe
+  // early-return, leaving the dropdown permanently empty.
+  sel.dataset.signature = signature;
 }
 
 /* ---------- chat ---------- */
@@ -114,7 +162,12 @@ async function send(text) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
-      body: JSON.stringify({ messages: history, stream: true, temperature: 0.7 }),
+      // No max_tokens: capping a reasoning model truncates it mid-thought and
+      // yields an empty answer (see 93e2468).
+      body: JSON.stringify({
+        ...(currentModel ? { model: currentModel } : {}),
+        messages: history, stream: true, temperature: 0.7,
+      }),
     });
     if (!res.ok) throw new Error(`server returned ${res.status}`);
 
@@ -196,6 +249,13 @@ $('composer').addEventListener('submit', (e) => {
   send(text);
 });
 $('stop').addEventListener('click', () => controller?.abort());
+$('model-select').addEventListener('change', (e) => {
+  currentModel = e.target.value;
+  try { localStorage.setItem('portable-llm-model', currentModel); } catch {}
+  // Chat templates and tokenizers differ per model; replaying one model's
+  // transcript into another produces confused output. Start clean.
+  $('new-chat').click();
+});
 $('new-chat').addEventListener('click', () => {
   controller?.abort();
   history = [];

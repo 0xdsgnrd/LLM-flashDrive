@@ -77,20 +77,33 @@ ollama serve                    # or a native llama-server on :11434
 docker compose up dev           # → http://localhost:5173
 ```
 
-## The model ladder
+## Router mode and the model ladder
 
-Launchers detect RAM and load the largest model fitting in
-**`min(70% of RAM, RAM - 4GB)`**. Both bounds are needed: the percentage alone
-starves big machines (a 32GB box skips a 20GB model by 0.8GB), while the
-absolute floor alone lets an 8GB box load a 5GB model with 3GB left for the OS.
+`llama-server --models-dir models/` serves **every** model on the drive and the
+UI picks one per request, so a single drive covers different jobs (coding,
+chat, fast/low-RAM) rather than one model per machine.
 
-| Host RAM | Budget | Model that loads |
-|---|---|---|
-| 8 GB | 4.0 GB | 4B |
-| 16 GB | 11.2 GB | 8B |
-| 32 GB | 22.4 GB | 32B |
-| 64 GB | 44.8 GB | 70B |
-| 128 GB | 89.6 GB | 70B |
+The RAM budget — **`min(70% of RAM, RAM - 4GB)`** — did not go away; it changed
+role. It now decides two things:
+
+1. **`--models-max`**, how many models may be resident at once. The llama-server
+   default is 4, which is fatal on a small host: four 20GB models is 80GB. The
+   launcher instead sizes N so that the N *largest* models still fit the budget.
+2. **Which models the UI offers.** Router mode lists everything in `models/`,
+   including files too large for the host, so the launcher writes
+   `ui/machine.json` and the UI greys out what will not fit. Missing manifest =
+   offer everything (fail open).
+
+| Host RAM | Budget | `--models-max` | Offered (of 4B/8B/32B) |
+|---|---|---|---|
+| 8 GB | 4.0 GB | 1 | 4B |
+| 16 GB | 11.2 GB | 2 | 4B, 8B |
+| 32 GB | 22.4 GB | 2 | all three |
+| 128 GB | 89.6 GB | 3 | all three |
+
+Both bounds in the budget are needed: the percentage alone starves big machines
+(a 32GB box skips a 20GB model by 0.8GB), while the absolute floor alone lets an
+8GB box load a 5GB model with 3GB left for the OS.
 
 A drive holding only a 70B is useless on the 16GB laptops most people own.
 

@@ -1,6 +1,6 @@
 #!/bin/bash
-# Portable LLM launcher — macOS (Apple Silicon)
-# Picks the largest model that fits in RAM, serves UI + API on one origin.
+# Portable LLM launcher — macOS (Apple Silicon), router mode.
+# Serves EVERY model in models/ and lets the UI pick per request.
 set -uo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,61 +15,73 @@ echo "  Portable LLM"
 echo "  ─────────────────────────────────────────"
 
 [ -x "$BIN" ] || { echo "  ✗ Missing binary: $BIN"; echo; read -r -p "  Press Return to close."; exit 1; }
-
-# Gatekeeper: clear quarantine on first run (harmless if already clear).
 xattr -dr com.apple.quarantine "$DIR/bin" 2>/dev/null || true
 
-# --- pick model by available RAM ---------------------------------------
 RAM=$(sysctl -n hw.memsize)
 RAM_GB=$((RAM / 1024 / 1024 / 1024))
-# Budget = min(70% of RAM, RAM - 4GB). The percentage alone starves big
-# machines (a 32GB box would skip a 20GB model by 0.8GB); the absolute floor
-# alone lets an 8GB box load a 5GB model with 3GB left for the OS. Both bound.
 B_PCT=$((RAM * 7 / 10))
 B_ABS=$((RAM - 4 * 1024 * 1024 * 1024))
 BUDGET=$(( B_PCT < B_ABS ? B_PCT : B_ABS ))
 
-BEST=""; BEST_SZ=0
+# ---- enumerate models -------------------------------------------------
 shopt -s nullglob
-for f in "$MODELS"/*.gguf; do
-  sz=$(stat -f%z "$f")
-  if [ "$sz" -le "$BUDGET" ] && [ "$sz" -gt "$BEST_SZ" ]; then BEST="$f"; BEST_SZ=$sz; fi
-done
+FILES=("$MODELS"/*.gguf)
 shopt -u nullglob
+[ ${#FILES[@]} -gt 0 ] || { echo "  ✗ No .gguf files in $MODELS"; echo
+  read -r -p "  Press Return to close."; exit 1; }
 
-if [ -z "$BEST" ]; then
-  echo "  ✗ No model fits in ${RAM_GB}GB of RAM (budget $((BUDGET/1024/1024/1024))GB)."
-  echo "    Models present:"
-  ls -1sh "$MODELS"/*.gguf 2>/dev/null | sed 's/^/      /' || echo "      (none)"
-  echo; read -r -p "  Press Return to close."; exit 1
-fi
+# ---- models-max: worst case is the N LARGEST all resident at once ------
+# Default is 4, which is fatal on a small machine (four 20GB models = 80GB).
+# Derive N from real file sizes so concurrent loads always fit the budget.
+FITTING=0; SUM=0; MAXN=0
+while read -r sz; do
+  [ "$sz" -le "$BUDGET" ] || continue          # skip models too big to load at all
+  FITTING=$((FITTING + 1))
+  if [ $((SUM + sz)) -le "$BUDGET" ]; then SUM=$((SUM + sz)); MAXN=$((MAXN + 1)); fi
+done < <(for f in "${FILES[@]}"; do stat -f%z "$f"; done | sort -nr)
 
-# --- find a free port --------------------------------------------------
+[ "$FITTING" -gt 0 ] || { echo "  ✗ No model fits in ${RAM_GB}GB of RAM."
+  for f in "${FILES[@]}"; do echo "      $(basename "$f")  $(( $(stat -f%z "$f") /1024/1024 ))MB"; done
+  echo; read -r -p "  Press Return to close."; exit 1; }
+[ "$MAXN" -ge 1 ] || MAXN=1
+
+# ---- manifest so the UI can grey out models this machine cannot run ----
+# Written into the served UI dir; harmless if the drive is read-only.
+{
+  printf '{"ramBytes":%s,"budgetBytes":%s,"modelsMax":%s,"models":{' "$RAM" "$BUDGET" "$MAXN"
+  sep=""
+  for f in "${FILES[@]}"; do
+    n=$(basename "$f" .gguf); sz=$(stat -f%z "$f")
+    fits=$([ "$sz" -le "$BUDGET" ] && echo true || echo false)
+    printf '%s"%s":{"bytes":%s,"fits":%s}' "$sep" "$n" "$sz" "$fits"; sep=","
+  done
+  printf '}}\n'
+} > "$UI/machine.json" 2>/dev/null || echo "  (note: could not write manifest — UI will offer all models)"
+
 PORT=8080
 while lsof -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1; do PORT=$((PORT+1)); done
 
 echo "  Machine : ${RAM_GB}GB RAM · Apple Silicon (Metal)"
-echo "  Model   : $(basename "$BEST") ($((BEST_SZ/1024/1024/1024))GB)"
+echo "  Models  : ${FITTING} of ${#FILES[@]} usable, up to ${MAXN} loaded at once"
 echo "  Address : http://127.0.0.1:$PORT"
 echo "  ─────────────────────────────────────────"
-echo "  Loading… first launch reads the model off the drive."
-echo "  Close this window to shut down."
+echo "  Pick a model in the sidebar. Close this window to shut down."
 echo
 
-"$BIN" -m "$BEST" --host 127.0.0.1 --port "$PORT" --path "$UI" \
-       -c "$CTX" -ngl 999 --no-warmup --cors-origins localhost > "$DIR/logs/server.log" 2>&1 &
+"$BIN" --models-dir "$MODELS" --host 127.0.0.1 --port "$PORT" --path "$UI" \
+       -c "$CTX" -ngl 999 --models-max "$MAXN" \
+       --cors-origins localhost --no-warmup > "$DIR/logs/server.log" 2>&1 &
 PID=$!
 trap 'kill $PID 2>/dev/null; wait $PID 2>/dev/null' EXIT INT TERM
 
-# wait for readiness, then open the browser
 for _ in $(seq 1 600); do
   if curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
     echo "  ✓ Ready — opening browser."
     open "http://127.0.0.1:$PORT"
     break
   fi
-  kill -0 $PID 2>/dev/null || { echo "  ✗ Server exited. Last lines:"; tail -15 "$DIR/logs/server.log"; echo; read -r -p "  Press Return to close."; exit 1; }
+  kill -0 $PID 2>/dev/null || { echo "  ✗ Server exited. Last lines:"; tail -15 "$DIR/logs/server.log"
+    echo; read -r -p "  Press Return to close."; exit 1; }
   sleep 1
 done
-
 wait $PID

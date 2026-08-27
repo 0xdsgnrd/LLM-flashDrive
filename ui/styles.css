@@ -62,3 +62,10 @@ code{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 .think summary::before{content:"▸ ";display:inline-block;transition:transform .15s}
 .think[open] summary::before{content:"▾ "}
 .think>*:not(summary){color:var(--muted);font-size:13.5px}
+
+/* Model picker */
+.model-row{margin-bottom:-3px}
+#model-select{width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:7px;
+  background:var(--bg);color:var(--fg);font:inherit;font-size:12.5px;cursor:pointer}
+#model-select:focus{outline:none;border-color:var(--accent)}
+#model-select option:disabled{color:var(--muted)}
