@@ -1,0 +1,41 @@
+# drive.lock — pinned inputs for a reproducible drive.
+#
+# Every line here is a fact resolved from an upstream API, not a guess. Sizes
+# alone do NOT identify a model: the four Llama-70B Q4_K_M repackages differ by
+# a few hundred bytes, and DeepSeek-R1-Distill-Llama-70B Q4_K_M lands within
+# 2,368 bytes of Llama-3.3-70B. sha256 is the only reliable identity.
+#
+#   add an entry     ./scripts/lock-add.sh <hf-repo> <filename>
+#   check the drive  ./scripts/verify-drive.sh          (not written yet)
+#
+# Fields are whitespace-separated; '#' starts a comment.
+
+# ---------------------------------------------------------------- toolchain
+# The commit the shipped binaries were actually built from, confirmed via
+# `git -C .cache/llama.cpp rev-parse HEAD`. It carries tag b10657, so the
+# existing `git clone --depth 1 --branch $LLAMA_REF` needs no restructuring
+# (--branch takes tags but NOT raw SHAs — pin to the tag, not the commit).
+llama_ref     b10657
+llama_commit  58546250cfaa1dc4a33ae6171dbe4344a96206e8
+
+# ------------------------------------------------------------------- models
+# model  <hf-repo>  <revision-sha>  <filename>  <bytes>  <sha256>
+
+model  Qwen/Qwen3-8B-GGUF  7c41481f57cb95916b40956ab2f0b139b296d974  Qwen3-8B-Q4_K_M.gguf  5027783488  d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785
+
+model  Qwen/Qwen3-32B-GGUF  938a7432affaec9157f883a87164e2646ae17555  Qwen3-32B-Q4_K_M.gguf  19762149024  efd971561896866f0e910cce52761ca77b1b138090c7f15fe284676d57d1f689
+
+model  bartowski/Llama-3.3-70B-Instruct-GGUF  b6c5c9f176f3279204034e1d16d393105e95cb88  Llama-3.3-70B-Instruct-Q4_K_M.gguf  42520398816  32df3baccb556f9840059b2528b2dee4d3d516b24afdfb9d0c56ff5f63e3a664
+
+# UNRESOLVED — Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+# Qwen/Qwen3-4B-Instruct-2507-GGUF does not exist; Qwen never published a GGUF
+# for this variant, so the copy on the drive came from a repackager. bartowski
+# is ruled out (its file is prefixed Qwen_). The remaining two differ by 672
+# bytes, which the drive was ejected before we could measure:
+#
+#   unsloth/Qwen3-4B-Instruct-2507-GGUF             2497281120
+#   lmstudio-community/Qwen3-4B-Instruct-2507-GGUF  2497280448
+#
+# Resolve on next mount:
+#   shasum -a 256 /Volumes/ai-Drive/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+#   ./scripts/lock-add.sh <the matching repo> Qwen3-4B-Instruct-2507-Q4_K_M.gguf
