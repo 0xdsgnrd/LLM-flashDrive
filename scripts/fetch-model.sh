@@ -29,23 +29,31 @@ URL="https://huggingface.co/$REPO/resolve/main/$FILE?download=true"
 OUT="$DRIVE/models/$FILE"
 echo "→ $OUT"
 
-# Long HF transfers degrade: an established connection can decay to ~1 MB/s while
-# a fresh one still gets ~9 MB/s. --speed-limit/--speed-time abort a stalled
-# transfer so the retry loop can reconnect; -C - resumes from the bytes on disk.
-for attempt in $(seq 1 40); do
-  if curl -fL --progress-bar -C - \
-          --speed-limit 500000 --speed-time 30 \
-          --connect-timeout 20 \
-          -o "$OUT" "$URL"; then
-    echo "  complete"
+# HuggingFace throttles sustained single-stream transfers: a connection starts
+# near 24 MB/s and decays to ~2 MB/s within minutes, while a FRESH connection to
+# the same file still measures ~9 MB/s. Waiting for a hard stall does not help —
+# it never drops below a stall threshold, it just crawls. So cycle the connection
+# on a timer and resume, which keeps every segment on a fast fresh socket.
+SIZE=$(curl -sIL "$URL" | awk 'BEGIN{IGNORECASE=1}/^content-length:/{n=$2}END{print n+0}' | tr -d '\r')
+[ "$SIZE" -gt 0 ] 2>/dev/null || SIZE=0
+[ "$SIZE" -gt 0 ] && echo "  remote size: $((SIZE/1024/1024))MB"
+
+for attempt in $(seq 1 400); do
+  HAVE=$(stat -f%z "$OUT" 2>/dev/null || stat -c%s "$OUT" 2>/dev/null || echo 0)
+  if [ "$SIZE" -gt 0 ] && [ "$HAVE" -ge "$SIZE" ]; then
+    echo "  complete ($((HAVE/1024/1024))MB)"
     break
   fi
+  # --max-time cycles the socket even while data is flowing; --speed-limit
+  # catches a genuine stall sooner. Both exit non-zero and resume via -C -.
+  curl -fL --progress-bar -C - \
+       --speed-limit 2000000 --speed-time 20 \
+       --max-time 90 --connect-timeout 20 \
+       -o "$OUT" "$URL" && { echo "  complete"; break; }
   rc=$?
-  # 22 = HTTP error (fatal); 33 = range not supported; anything else: reconnect.
-  if [ $rc -eq 22 ] || [ $rc -eq 33 ]; then
-    echo "  ✗ curl exit $rc — not retryable"; exit $rc
-  fi
-  echo "  connection stalled (curl $rc) — reconnecting, attempt $attempt"
-  sleep 3
+  if [ $rc -eq 22 ]; then echo "  ✗ HTTP error — not retryable"; exit 22; fi
+  NOW=$(stat -f%z "$OUT" 2>/dev/null || stat -c%s "$OUT" 2>/dev/null || echo 0)
+  echo "  cycling connection (curl $rc) at $((NOW/1024/1024))MB — attempt $attempt"
 done
+
 ls -lh "$OUT"
