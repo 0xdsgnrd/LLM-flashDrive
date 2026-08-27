@@ -1,0 +1,9 @@
+# Build outputs and caches — never commit binaries or weights
+dist/
+.cache/
+node_modules/
+__pycache__/
+*.gguf
+*.log
+.DS_Store
+._*

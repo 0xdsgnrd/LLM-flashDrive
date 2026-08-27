@@ -1,0 +1,26 @@
+# Static linux-x64 llama-server for maximum portability.
+# bullseye (glibc 2.31) is deliberately OLD — binaries built against a newer
+# glibc fail on older machines with "GLIBC_2.xx not found".
+FROM debian:bullseye
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential cmake git ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+ARG LLAMA_REF=master
+RUN git clone --depth 1 --branch ${LLAMA_REF} https://github.com/ggml-org/llama.cpp /src
+WORKDIR /src
+
+# GGML_NATIVE=OFF is critical: without it the build bakes in the build machine's
+# CPU features (AVX-512 etc.) and the binary dies with SIGILL on older CPUs.
+RUN cmake -B build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DGGML_NATIVE=OFF \
+      -DGGML_STATIC=ON \
+      -DBUILD_SHARED_LIBS=OFF \
+      -DLLAMA_CURL=OFF \
+      -DLLAMA_OPENSSL=OFF \
+      -DLLAMA_BUILD_TESTS=OFF \
+      -DLLAMA_BUILD_EXAMPLES=OFF \
+      -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++" \
+ && cmake --build build --config Release -j"$(nproc)" --target llama-server
+CMD ["cp", "-v", "/src/build/bin/llama-server", "/out/"]

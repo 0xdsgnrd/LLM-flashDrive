@@ -1,0 +1,12 @@
+{
+  "name": "LLM-flashDrive",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "dev",
+  "workspaceFolder": "/work",
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python", "dbaeumer.vscode-eslint"]
+    }
+  },
+  "remoteUser": "root"
+}

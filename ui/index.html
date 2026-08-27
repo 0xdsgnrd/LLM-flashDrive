@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portable LLM</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<aside id="sidebar">
+  <div class="brand">Portable&nbsp;LLM</div>
+  <button id="new-chat">＋ New chat</button>
+  <div class="meta">
+    <div class="row"><span>Model</span><b id="model-name">—</b></div>
+    <div class="row"><span>Status</span><b id="status" class="off">offline</b></div>
+    <div class="row"><span>Speed</span><b id="tps">—</b></div>
+  </div>
+  <div class="hint">Runs entirely on this machine.<br>No internet required.</div>
+</aside>
+
+<main>
+  <div id="messages">
+    <div class="empty">
+      <h1>Local model, ready.</h1>
+      <p>Everything below runs from the drive. Nothing leaves this computer.</p>
+    </div>
+  </div>
+  <form id="composer">
+    <textarea id="input" rows="1" placeholder="Send a message…  (Enter to send, Shift+Enter for newline)"></textarea>
+    <button id="send" type="submit">Send</button>
+    <button id="stop" type="button" hidden>Stop</button>
+  </form>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

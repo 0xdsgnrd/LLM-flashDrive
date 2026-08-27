@@ -1,0 +1,27 @@
+# Cross-compile win-x64 llama-server.exe from Linux using mingw-w64.
+# Fully static so the target needs no MSVC/mingw runtime DLLs.
+FROM debian:bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential cmake git ca-certificates mingw-w64 \
+ && rm -rf /var/lib/apt/lists/*
+
+ARG LLAMA_REF=master
+RUN git clone --depth 1 --branch ${LLAMA_REF} https://github.com/ggml-org/llama.cpp /src
+WORKDIR /src
+
+RUN cmake -B build \
+      -DCMAKE_SYSTEM_NAME=Windows \
+      -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
+      -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
+      -DCMAKE_RC_COMPILER=x86_64-w64-mingw32-windres \
+      -DCMAKE_FIND_ROOT_PATH=/usr/x86_64-w64-mingw32 \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DGGML_NATIVE=OFF \
+      -DBUILD_SHARED_LIBS=OFF \
+      -DLLAMA_CURL=OFF \
+      -DLLAMA_OPENSSL=OFF \
+      -DLLAMA_BUILD_TESTS=OFF \
+      -DLLAMA_BUILD_EXAMPLES=OFF \
+      -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++" \
+ && cmake --build build --config Release -j"$(nproc)" --target llama-server
+CMD ["cp", "-v", "/src/build/bin/llama-server.exe", "/out/"]

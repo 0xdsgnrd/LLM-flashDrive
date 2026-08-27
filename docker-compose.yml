@@ -1,0 +1,13 @@
+services:
+  dev:
+    build: { context: ., dockerfile: docker/Dockerfile.dev }
+    ports: ["5173:5173"]
+    volumes: [".:/work"]
+    working_dir: /work
+    environment:
+      # The model runs NATIVELY on the host with Metal. The container never
+      # does inference — it only proxies to the host. See README "GPU wall".
+      LLAMA_HOST: host.docker.internal:11434
+      UI_DIR: /work/ui
+    extra_hosts: ["host.docker.internal:host-gateway"]   # needed on Linux hosts
+    command: node scripts/devserver.mjs
