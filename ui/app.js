@@ -47,6 +47,19 @@ function renderBody(text) {
   }).join('');
 }
 
+// llama-server splits reasoning into its own `reasoning_content` field rather
+// than inlining <think> tags, so a turn has two independent parts.
+function renderTurn(reasoning, content, streaming) {
+  let html = '';
+  if (reasoning) {
+    const open = streaming && !content;      // stay open until the answer starts
+    html += `<details class="think"${open ? ' open' : ''}>` +
+            `<summary>${open ? 'thinking…' : 'reasoning'}</summary>` +
+            renderBody(reasoning) + '</details>';
+  }
+  return html + render(content);
+}
+
 function addMessage(role, text) {
   msgs.querySelector('.empty')?.remove();
   const el = document.createElement('div');
@@ -92,6 +105,7 @@ async function send(text) {
   controller = new AbortController();
 
   let acc = '';
+  let reasoning = '';
   let tokens = 0;
   const t0 = performance.now();
 
@@ -120,18 +134,20 @@ async function send(text) {
         if (!line.startsWith('data: ')) continue;
         const payload = line.slice(6).trim();
         if (payload === '[DONE]') continue;
-        let delta;
-        try { delta = JSON.parse(payload).choices?.[0]?.delta?.content; }
+        let d;
+        try { d = JSON.parse(payload).choices?.[0]?.delta ?? {}; }
         catch { continue; }                             // ignore malformed keep-alives
-        if (!delta) continue;
-        acc += delta;
-        tokens++;
-        body.innerHTML = render(acc) + '<span class="cursor"></span>';
+        if (d.reasoning_content) { reasoning += d.reasoning_content; tokens++; }
+        if (d.content)           { acc       += d.content;           tokens++; }
+        if (!d.reasoning_content && !d.content) continue;
+        body.innerHTML = renderTurn(reasoning, acc, true) + '<span class="cursor"></span>';
         msgs.scrollTop = msgs.scrollHeight;
         $('tps').textContent =
           (tokens / ((performance.now() - t0) / 1000)).toFixed(1) + ' tok/s';
       }
     }
+    // Reasoning is deliberately NOT pushed to history — models are trained to
+    // see only prior answers, and replaying it wastes context every turn.
     history.push({ role: 'assistant', content: acc });
     save();
   } catch (err) {
@@ -140,7 +156,7 @@ async function send(text) {
       probe();
     }
   } finally {
-    body.innerHTML = render(acc);
+    body.innerHTML = renderTurn(reasoning, acc, false);
     $('send').disabled = false;
     $('stop').hidden = true;
     controller = null;
