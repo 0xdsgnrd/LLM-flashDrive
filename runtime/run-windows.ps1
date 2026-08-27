@@ -19,9 +19,16 @@ $Ram    = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
 $RamGb  = [math]::Round($Ram / 1GB)
 $Budget = [Math]::Min($Ram * 0.7, $Ram - 4GB)
 
-$Files = @(Get-ChildItem -Path $Models -Filter *.gguf -ErrorAction SilentlyContinue)
+# See run-mac.command: multi-part models are one model across several files and
+# nothing groups them, so counting each part separately breaks the size math.
+$AllFiles = @(Get-ChildItem -Path $Models -Filter *.gguf -ErrorAction SilentlyContinue)
+$Split = @($AllFiles | Where-Object { $_.Name -match '-\d{5}-of-\d{5}\.gguf$' })
+$Files = @($AllFiles | Where-Object { $_.Name -notmatch '-\d{5}-of-\d{5}\.gguf$' })
+if ($Split.Count -gt 0) {
+    Write-Host "  ! Skipping $($Split.Count) multi-part file(s) - split models are not supported yet."
+}
 if ($Files.Count -eq 0) {
-    Write-Host "  x No .gguf files in $Models" -ForegroundColor Red
+    Write-Host "  x No usable .gguf files in $Models" -ForegroundColor Red
     Read-Host "  Press Enter to close"; exit 1
 }
 

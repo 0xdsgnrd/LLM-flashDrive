@@ -24,11 +24,23 @@ B_ABS=$((RAM - 4 * 1024 * 1024 * 1024))
 BUDGET=$(( B_PCT < B_ABS ? B_PCT : B_ABS ))
 
 # ---- enumerate models -------------------------------------------------
+# Multi-part models (foo-00001-of-00003.gguf) are ONE model split across files,
+# but nothing here groups them: each part would count as its own model, wrecking
+# the size math below. Skip them rather than silently miscount. The UI applies
+# the same rule, because router mode lists them in /v1/models regardless.
 shopt -s nullglob
-FILES=("$MODELS"/*.gguf)
+ALL=("$MODELS"/*.gguf)
 shopt -u nullglob
-[ ${#FILES[@]} -gt 0 ] || { echo "  ✗ No .gguf files in $MODELS"; echo
-  read -r -p "  Press Return to close."; exit 1; }
+FILES=(); SPLIT=()
+for f in "${ALL[@]}"; do
+  if [[ "$(basename "$f")" =~ -[0-9]{5}-of-[0-9]{5}\.gguf$ ]]; then SPLIT+=("$f")
+  else FILES+=("$f"); fi
+done
+[ ${#SPLIT[@]} -eq 0 ] || echo "  ! Skipping ${#SPLIT[@]} multi-part file(s) — split models are not supported yet."
+
+[ ${#FILES[@]} -gt 0 ] || { echo "  ✗ No usable .gguf files in $MODELS"
+  [ ${#SPLIT[@]} -eq 0 ] || echo "    (only multi-part files found)"
+  echo; read -r -p "  Press Return to close."; exit 1; }
 
 # ---- models-max: worst case is the N LARGEST all resident at once ------
 # Default is 4, which is fatal on a small machine (four 20GB models = 80GB).

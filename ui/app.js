@@ -113,22 +113,31 @@ async function populateModels(ids) {
   if (sel.dataset.signature === signature) return;   // no churn while streaming
 
   const info = (await loadManifest()).models ?? {};
+
+  // Router mode lists every .gguf in models/, including individual parts of a
+  // multi-part model (foo-00001-of-00003). Those parts are ONE model and cannot
+  // be run individually, so offering them as separate entries would hand the
+  // user broken choices. The launcher applies the same filter to its size math.
+  const SPLIT_PART = /-\d{5}-of-\d{5}$/;
   const saved = (() => { try { return localStorage.getItem('portable-llm-model'); } catch { return null; } })();
 
   sel.innerHTML = '';
   let firstUsable = null;
   for (const id of ids) {
     const meta = info[id];
-    const fits = !meta || meta.fits !== false;       // unknown => assume usable
+    const isPart = SPLIT_PART.test(id);
+    const fits = !isPart && (!meta || meta.fits !== false);   // unknown => assume usable
     const opt = document.createElement('option');
     opt.value = id;
     opt.textContent = meta ? `${id}  (${prettyBytes(meta.bytes)})` : id;
-    if (!fits) { opt.disabled = true; opt.textContent += '  — too large'; }
+    if (isPart)      { opt.disabled = true; opt.textContent += '  — multi-part, unsupported'; }
+    else if (!fits)  { opt.disabled = true; opt.textContent += '  — too large'; }
     else if (firstUsable === null) firstUsable = id;
     sel.appendChild(opt);
   }
 
-  const savedUsable = saved && ids.includes(saved) && info[saved]?.fits !== false;
+  const savedUsable = saved && ids.includes(saved) &&
+                      !SPLIT_PART.test(saved) && info[saved]?.fits !== false;
   currentModel = savedUsable ? saved : firstUsable;
   if (currentModel) sel.value = currentModel;
 
