@@ -27,15 +27,11 @@ model  Qwen/Qwen3-32B-GGUF  938a7432affaec9157f883a87164e2646ae17555  Qwen3-32B-
 
 model  bartowski/Llama-3.3-70B-Instruct-GGUF  b6c5c9f176f3279204034e1d16d393105e95cb88  Llama-3.3-70B-Instruct-Q4_K_M.gguf  42520398816  32df3baccb556f9840059b2528b2dee4d3d516b24afdfb9d0c56ff5f63e3a664
 
-# UNRESOLVED — Qwen3-4B-Instruct-2507-Q4_K_M.gguf
-# Qwen/Qwen3-4B-Instruct-2507-GGUF does not exist; Qwen never published a GGUF
-# for this variant, so the copy on the drive came from a repackager. bartowski
-# is ruled out (its file is prefixed Qwen_). The remaining two differ by 672
-# bytes, which the drive was ejected before we could measure:
-#
-#   unsloth/Qwen3-4B-Instruct-2507-GGUF             2497281120
-#   lmstudio-community/Qwen3-4B-Instruct-2507-GGUF  2497280448
-#
-# Resolve on next mount:
-#   shasum -a 256 /Volumes/ai-Drive/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
-#   ./scripts/lock-add.sh <the matching repo> Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+
+model  unsloth/gemma-4-12B-it-qat-GGUF  980b060c40a8539ac159e0501a3e0f66a6365af3  gemma-4-12B-it-qat-UD-Q4_K_XL.gguf  6716356800  90fd44e29e0d7cffeb0fd00dc73cfdab9ed0b0e95306ecf7821ea634c940c370
+
+model  unsloth/gemma-4-26B-A4B-it-GGUF  c099eb48e663fd284577b04978a94ffccb261841  gemma-4-26B-A4B-it-UD-Q4_K_M.gguf  16947541728  f2c28b3dc4776931ac6f879e11f203dec637ea0f14267a86ec8f6165f63f293f
+
+model  unsloth/DeepSeek-R1-Distill-Llama-70B-GGUF  732dd974083ea5877d7b6d788b36fe7c2e5eab36  DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf  42520396448  952ff479c48ac3ece81fb6d9a5a03bfeac215e6caac780fbe91ff8cb0e05bcf3
+
+model  unsloth/Qwen3-4B-Instruct-2507-GGUF  a06e946bb6b655725eafa393f4a9745d460374c9  Qwen3-4B-Instruct-2507-Q4_K_M.gguf  2497281120  3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597
