@@ -79,16 +79,18 @@ docker compose up dev           # → http://localhost:5173
 
 ## The model ladder
 
-Launchers detect RAM and load the **largest model that fits in 60% of it**
-(the rest goes to KV cache and the OS). Ship several sizes so the drive works
-on any machine:
+Launchers detect RAM and load the largest model fitting in
+**`min(70% of RAM, RAM - 4GB)`**. Both bounds are needed: the percentage alone
+starves big machines (a 32GB box skips a 20GB model by 0.8GB), while the
+absolute floor alone lets an 8GB box load a 5GB model with 3GB left for the OS.
 
-| Host RAM | Model that loads |
-|---|---|
-| 8 GB | ~4B |
-| 16 GB | ~8B |
-| 32 GB | ~32B |
-| 64 GB+ | ~70B |
+| Host RAM | Budget | Model that loads |
+|---|---|---|
+| 8 GB | 4.0 GB | 4B |
+| 16 GB | 11.2 GB | 8B |
+| 32 GB | 22.4 GB | 32B |
+| 64 GB | 44.8 GB | 70B |
+| 128 GB | 89.6 GB | 70B |
 
 A drive holding only a 70B is useless on the 16GB laptops most people own.
 

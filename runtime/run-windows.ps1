@@ -18,7 +18,8 @@ if (-not (Test-Path $Bin)) {
 # --- pick model by available RAM ---------------------------------------
 $Ram    = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
 $RamGb  = [math]::Round($Ram / 1GB)
-$Budget = $Ram * 0.6
+# Budget = min(70% of RAM, RAM - 4GB) -- see run-mac.command for rationale.
+$Budget = [Math]::Min($Ram * 0.7, $Ram - 4GB)
 
 $Best = Get-ChildItem -Path $Models -Filter *.gguf -ErrorAction SilentlyContinue |
         Where-Object { $_.Length -le $Budget } |

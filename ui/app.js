@@ -11,8 +11,28 @@ let controller = null;
 const esc = (s) => s.replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-// Minimal markdown: fenced code, inline code, bold. Everything is escaped first.
+// Qwen3 and other hybrid-reasoning models emit <think>...</think> inline.
+// Render those as a collapsed block instead of leaking raw tags into the chat.
+// The closing tag is absent mid-stream, so an unterminated block stays open.
 function render(text) {
+  const out = [];
+  const re = /<think>([\s\S]*?)(<\/think>|$)/g;
+  let last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push(renderBody(text.slice(last, m.index)));
+    const streaming = !m[2];
+    out.push(`<details class="think"${streaming ? ' open' : ''}>` +
+             `<summary>${streaming ? 'thinking…' : 'reasoning'}</summary>` +
+             renderBody(m[1]) + '</details>');
+    last = re.lastIndex;
+    if (streaming) break;
+  }
+  if (last < text.length) out.push(renderBody(text.slice(last)));
+  return out.join('');
+}
+
+// Minimal markdown: fenced code, inline code, bold. Everything is escaped first.
+function renderBody(text) {
   const parts = text.split(/```/);
   return parts.map((chunk, i) => {
     if (i % 2 === 1) {                                  // inside a fence

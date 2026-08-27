@@ -20,7 +20,12 @@ fi
 
 RAM=$(( $(awk '/MemTotal/{print $2}' /proc/meminfo) * 1024 ))
 RAM_GB=$((RAM / 1024 / 1024 / 1024))
-BUDGET=$((RAM * 6 / 10))
+# Budget = min(70% of RAM, RAM - 4GB). The percentage alone starves big
+# machines (a 32GB box would skip a 20GB model by 0.8GB); the absolute floor
+# alone lets an 8GB box load a 5GB model with 3GB left for the OS. Both bound.
+B_PCT=$((RAM * 7 / 10))
+B_ABS=$((RAM - 4 * 1024 * 1024 * 1024))
+BUDGET=$(( B_PCT < B_ABS ? B_PCT : B_ABS ))
 
 BEST=""; BEST_SZ=0
 shopt -s nullglob

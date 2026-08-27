@@ -26,6 +26,26 @@ fi
 
 mkdir -p "$DRIVE/models"
 URL="https://huggingface.co/$REPO/resolve/main/$FILE?download=true"
-echo "→ $DRIVE/models/$FILE"
-curl -fL --progress-bar -C - -o "$DRIVE/models/$FILE" "$URL"
-ls -lh "$DRIVE/models/$FILE"
+OUT="$DRIVE/models/$FILE"
+echo "→ $OUT"
+
+# Long HF transfers degrade: an established connection can decay to ~1 MB/s while
+# a fresh one still gets ~9 MB/s. --speed-limit/--speed-time abort a stalled
+# transfer so the retry loop can reconnect; -C - resumes from the bytes on disk.
+for attempt in $(seq 1 40); do
+  if curl -fL --progress-bar -C - \
+          --speed-limit 500000 --speed-time 30 \
+          --connect-timeout 20 \
+          -o "$OUT" "$URL"; then
+    echo "  complete"
+    break
+  fi
+  rc=$?
+  # 22 = HTTP error (fatal); 33 = range not supported; anything else: reconnect.
+  if [ $rc -eq 22 ] || [ $rc -eq 33 ]; then
+    echo "  ✗ curl exit $rc — not retryable"; exit $rc
+  fi
+  echo "  connection stalled (curl $rc) — reconnecting, attempt $attempt"
+  sleep 3
+done
+ls -lh "$OUT"
