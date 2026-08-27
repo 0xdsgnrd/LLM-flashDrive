@@ -34,11 +34,15 @@ if ($Files.Count -eq 0) {
 
 # See run-mac.command: --models-max default of 4 is fatal on small machines.
 # Worst case is the N largest all resident, so size N against real files.
-$Fitting = 0; $Sum = 0; $MaxN = 0
+$Fitting = 0; $Sum = 0; $MaxN = 0; $Packing = $true
 foreach ($f in ($Files | Sort-Object Length -Descending)) {
     if ($f.Length -gt $Budget) { continue }
     $Fitting++
-    if (($Sum + $f.Length) -le $Budget) { $Sum += $f.Length; $MaxN++ }
+    # Stop growing MaxN at the first model that does not fit: --models-max is a
+    # COUNT, not a set, so the only safe N is one where the N LARGEST fit
+    # together. Keep looping so $Fitting still counts the rest.
+    if ($Packing -and (($Sum + $f.Length) -le $Budget)) { $Sum += $f.Length; $MaxN++ }
+    else { $Packing = $false }
 }
 if ($Fitting -eq 0) {
     Write-Host "  x No model fits in ${RamGb}GB of RAM." -ForegroundColor Red

@@ -45,11 +45,19 @@ done
 # ---- models-max: worst case is the N LARGEST all resident at once ------
 # Default is 4, which is fatal on a small machine (four 20GB models = 80GB).
 # Derive N from real file sizes so concurrent loads always fit the budget.
-FITTING=0; SUM=0; MAXN=0
+FITTING=0; SUM=0; MAXN=0; PACKING=1
 while read -r sz; do
   [ "$sz" -le "$BUDGET" ] || continue          # skip models too big to load at all
   FITTING=$((FITTING + 1))
-  if [ $((SUM + sz)) -le "$BUDGET" ]; then SUM=$((SUM + sz)); MAXN=$((MAXN + 1)); fi
+  # Stop growing MAXN at the first model that does not fit. --models-max is a
+  # COUNT, not a set: the router may load ANY N models, so the only safe N is
+  # one where the N LARGEST fit together. Continuing to pack smaller models
+  # after an overflow inflates N past that guarantee.
+  if [ "$PACKING" -eq 1 ] && [ $((SUM + sz)) -le "$BUDGET" ]; then
+    SUM=$((SUM + sz)); MAXN=$((MAXN + 1))
+  else
+    PACKING=0                                  # keep looping: FITTING still counts
+  fi
 done < <(for f in "${FILES[@]}"; do stat -f%z "$f"; done | sort -nr)
 
 [ "$FITTING" -gt 0 ] || { echo "  ✗ No model fits in ${RAM_GB}GB of RAM."

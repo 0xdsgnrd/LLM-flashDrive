@@ -42,11 +42,19 @@ done
   echo; read -r -p "  Press Return to close."; exit 1; }
 
 # See run-mac.command: --models-max default of 4 is fatal on small machines.
-FITTING=0; SUM=0; MAXN=0
+FITTING=0; SUM=0; MAXN=0; PACKING=1
 while read -r sz; do
   [ "$sz" -le "$BUDGET" ] || continue
   FITTING=$((FITTING + 1))
-  if [ $((SUM + sz)) -le "$BUDGET" ]; then SUM=$((SUM + sz)); MAXN=$((MAXN + 1)); fi
+  # Stop growing MAXN at the first model that does not fit. --models-max is a
+  # COUNT, not a set: the router may load ANY N models, so the only safe N is
+  # one where the N LARGEST fit together. Continuing to pack smaller models
+  # after an overflow inflates N past that guarantee.
+  if [ "$PACKING" -eq 1 ] && [ $((SUM + sz)) -le "$BUDGET" ]; then
+    SUM=$((SUM + sz)); MAXN=$((MAXN + 1))
+  else
+    PACKING=0                                  # keep looping: FITTING still counts
+  fi
 done < <(for f in "${FILES[@]}"; do stat -c%s "$f"; done | sort -nr)
 
 [ "$FITTING" -gt 0 ] || { echo "  ✗ No model fits in ${RAM_GB}GB of RAM."; echo
