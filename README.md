@@ -96,7 +96,15 @@ A drive holding only a 70B is useless on the 16GB laptops most people own.
 
 - **`GGML_NATIVE=OFF`** on cross-builds — otherwise the binary bakes in the build
   machine's AVX-512 and dies with SIGILL on older CPUs.
-- **Old glibc base (bullseye)** — build on new glibc and it fails with `GLIBC_2.xx not found`.
+- **Old glibc base (bullseye 2.31)** — build on new glibc and it fails with `GLIBC_2.xx not found`.
+- **NOT fully static on Linux.** glibc cannot be statically linked with NPTL/dlopen —
+  `-static` fails at link time on `_dl_pagesize`, `_dl_stack_flags`, `_dl_init_static_tls`.
+  Link glibc dynamically against an *old* glibc instead; it is forward compatible.
+- **`GGML_OPENMP=OFF`** — otherwise the binary needs `libgomp.so.1`, which is absent from
+  a minimal Linux install. llama.cpp's own threadpool replaces it.
+- **mingw `-posix` compiler variants** for Windows — Debian's default mingw-w64 uses the
+  win32 threading model, whose libstdc++ has no `std::thread`/`std::mutex`/
+  `std::condition_variable`. Build fails with 131 "does not name a type" errors.
 - **Fully static Windows build** — no mingw runtime DLLs required on the target.
 - **Ad-hoc codesign on arm64** — required by macOS; survives the copy to exFAT.
 - **CRLF for `.bat`/`.ps1`, LF for `.sh`/`.command`** — enforced in `runtime/`.
@@ -104,6 +112,22 @@ A drive holding only a 70B is useless on the 16GB laptops most people own.
 - **`-ExecutionPolicy Bypass`** so the PowerShell launcher runs without admin.
 - **exFAT has no journal** — always eject cleanly; never put a git repo or
   `node_modules` on the drive.
+
+## Verifying a build is actually portable
+
+A build that succeeds locally proves nothing. After each one:
+
+```bash
+# macOS — must print nothing
+otool -L dist/mac-arm64/llama-server | grep -v "/usr/lib/\|/System/"
+otool -l dist/mac-arm64/llama-server | grep LC_RPATH     # no local paths
+
+# Linux — every dep must resolve in a MINIMAL image, not your build image
+docker run --rm --platform linux/amd64 -v "$PWD/dist/linux-x64:/x:ro" \
+  debian:bullseye-slim ldd /x/llama-server        # no "not found"
+```
+
+`libgomp.so.1 => not found` was caught exactly this way, after a build that reported success.
 
 ## Known friction (cosmetic)
 

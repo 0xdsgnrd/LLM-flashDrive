@@ -1,6 +1,14 @@
 # Cross-compile win-x64 llama-server.exe from Linux using mingw-w64.
 # Fully static so the target needs no MSVC/mingw runtime DLLs.
-FROM debian:bookworm
+FROM debian:trixie
+# trixie, NOT bookworm: bookworm's mingw-w64 (GCC 12) has no
+# THREAD_POWER_THROTTLING_STATE, which ggml-cpu.c requires. trixie ships GCC 14
+# with it in processthreadsapi.h. The container's own age is irrelevant here —
+# mingw emits Windows binaries, so there is no glibc-compatibility concern
+# (unlike Dockerfile.linux-build, which must stay on OLD bullseye).
+# NOTE: must use the -posix compiler variants. Debian's default mingw-w64 uses
+# the win32 threading model, whose libstdc++ has no std::thread/std::mutex/
+# std::condition_variable — llama.cpp fails with 131 "does not name a type".
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential cmake git ca-certificates mingw-w64 \
  && rm -rf /var/lib/apt/lists/*
@@ -11,12 +19,13 @@ WORKDIR /src
 
 RUN cmake -B build \
       -DCMAKE_SYSTEM_NAME=Windows \
-      -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
-      -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
+      -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc-posix \
+      -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++-posix \
       -DCMAKE_RC_COMPILER=x86_64-w64-mingw32-windres \
       -DCMAKE_FIND_ROOT_PATH=/usr/x86_64-w64-mingw32 \
       -DCMAKE_BUILD_TYPE=Release \
       -DGGML_NATIVE=OFF \
+      -DGGML_OPENMP=OFF \
       -DBUILD_SHARED_LIBS=OFF \
       -DLLAMA_CURL=OFF \
       -DLLAMA_OPENSSL=OFF \

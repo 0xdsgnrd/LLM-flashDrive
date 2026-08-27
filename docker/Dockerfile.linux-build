@@ -12,10 +12,16 @@ WORKDIR /src
 
 # GGML_NATIVE=OFF is critical: without it the build bakes in the build machine's
 # CPU features (AVX-512 etc.) and the binary dies with SIGILL on older CPUs.
+#
+# NOT fully static: glibc does not support -static with NPTL/dlopen (it fails at
+# link time on _dl_pagesize, _dl_stack_flags, _dl_init_static_tls). The portable
+# approach is instead: link glibc DYNAMICALLY but build against an OLD glibc
+# (bullseye = 2.31), and statically link libgcc/libstdc++. glibc is forward
+# compatible, so 2.31 runs on every mainstream distro from 2020 onward.
 RUN cmake -B build \
       -DCMAKE_BUILD_TYPE=Release \
       -DGGML_NATIVE=OFF \
-      -DGGML_STATIC=ON \
+      -DGGML_OPENMP=OFF \
       -DBUILD_SHARED_LIBS=OFF \
       -DLLAMA_CURL=OFF \
       -DLLAMA_OPENSSL=OFF \
