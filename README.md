@@ -128,6 +128,27 @@ A drive holding only a 70B is useless on the 16GB laptops most people own.
 - **exFAT has no journal** — always eject cleanly; never put a git repo or
   `node_modules` on the drive.
 
+## Reproducible drive contents
+
+`drive.lock` pins every model to a repo **revision SHA** and **sha256**, and
+pins the llama.cpp tag the binaries were built from.
+
+```bash
+./scripts/lock-add.sh <hf-repo> <file.gguf>   # resolve + pin a new model
+./scripts/verify-drive.sh                     # presence + byte size (seconds)
+./scripts/verify-drive.sh --sha               # + sha256 (minutes, reads everything)
+```
+
+**Size is not identity.** DeepSeek-R1-Distill-Llama-70B Q4_K_M and
+Llama-3.3-70B-Instruct Q4_K_M differ by 2,368 bytes out of 42.5GB — a size check
+cannot tell them apart. exFAT is also unjournaled, so an interrupted write can
+leave a file at exactly the right length. Run `--sha` before trusting a drive
+you did not fill yourself, or after any flaky transfer.
+
+The verifier also reports models on the drive that are **not** pinned, lock
+entries not yet downloaded, and whether the host's own binary was built from the
+pinned commit (the cross-compiled ones cannot be executed to check).
+
 ## Verifying a build is actually portable
 
 A build that succeeds locally proves nothing. After each one:
