@@ -33,11 +33,14 @@ type DocInfo struct {
 	Chunks int `json:"chunks"`
 }
 
-// Text only, and checked rather than trusted: a PDF or an image dropped in here
-// would index as line noise and quietly poison every search.
+// A file with no recognised format still has to read as text, or it would index
+// as line noise and quietly poison every search.
 var ErrNotText = errors.New("not a text document")
 
-const maxDocBytes = 16 << 20 // 16MB — a book of plain text is ~1MB
+const (
+	maxDocBytes    = 16 << 20 // 16MB of extracted text — a book is around 1MB
+	maxUploadBytes = 64 << 20 // an archive or a picture-heavy PDF is much larger
+)
 
 type DocStore struct {
 	dir string
@@ -83,15 +86,14 @@ func looksBinary(b []byte) bool {
 	return n > 0 && ctrl*100/n > 5
 }
 
-func (d *DocStore) Add(name, content string) (DocMeta, error) {
+// AddText stores text that has already been through Extract. Everything format
+// specific happens there; by this point a .pdf and a .md are the same thing.
+func (d *DocStore) AddText(name, content string) (DocMeta, error) {
 	if len(content) > maxDocBytes {
-		return DocMeta{}, fmt.Errorf("document is larger than %dMB", maxDocBytes>>20)
+		return DocMeta{}, fmt.Errorf("extracted text is larger than %dMB", maxDocBytes>>20)
 	}
 	if strings.TrimSpace(content) == "" {
-		return DocMeta{}, errors.New("document is empty")
-	}
-	if looksBinary([]byte(content)) {
-		return DocMeta{}, ErrNotText
+		return DocMeta{}, errors.New("no text could be read from it")
 	}
 
 	d.mu.Lock()

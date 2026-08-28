@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -9,7 +8,7 @@ import (
 
 func TestDocRoundTrip(t *testing.T) {
 	d := newDocs(t)
-	m, err := d.Add("notes.md", "# Notes\n\nThe drive is exFAT.")
+	m, err := d.AddText("notes.md", "# Notes\n\nThe drive is exFAT.")
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -22,32 +21,28 @@ func TestDocRoundTrip(t *testing.T) {
 	}
 }
 
-// A PDF or an image dropped in would index as line noise and poison every
-// search, so it has to be refused rather than stored.
-func TestBinaryFilesAreRejected(t *testing.T) {
+// Format handling lives in Extract (see extract_test.go); by the time text
+// reaches the store the only questions left are "is there any" and "is it sane".
+func TestAddTextRejectsEmptyAndOversized(t *testing.T) {
 	d := newDocs(t)
-	pdf := "%PDF-1.4\n\x00\x01\x02\x03binary\x00\x00garbage"
-	if _, err := d.Add("paper.pdf", pdf); !errors.Is(err, ErrNotText) {
-		t.Errorf("binary accepted, err = %v", err)
-	}
-	if _, err := d.Add("empty.txt", "   \n "); err == nil {
+	if _, err := d.AddText("empty.txt", "   \n "); err == nil {
 		t.Error("empty document accepted")
 	}
-	if _, err := d.Add("huge.txt", strings.Repeat("a", maxDocBytes+1)); err == nil {
+	if _, err := d.AddText("huge.txt", strings.Repeat("a", maxDocBytes+1)); err == nil {
 		t.Error("oversized document accepted")
 	}
 }
 
 func TestRealTextWithAccentsIsAccepted(t *testing.T) {
 	d := newDocs(t)
-	if _, err := d.Add("café.md", "Café notes — em dashes, ümlauts, 日本語, emoji 🎧.\ttabs too."); err != nil {
+	if _, err := d.AddText("café.md", "Café notes — em dashes, ümlauts, 日本語, emoji 🎧.\ttabs too."); err != nil {
 		t.Errorf("legitimate unicode text rejected: %v", err)
 	}
 }
 
 func TestDocNameCannotEscapeTheDirectory(t *testing.T) {
 	d := newDocs(t)
-	m, err := d.Add("../../../etc/passwd", "root:x:0:0")
+	m, err := d.AddText("../../../etc/passwd", "root:x:0:0")
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -61,8 +56,8 @@ func TestDocNameCannotEscapeTheDirectory(t *testing.T) {
 
 func TestDeleteAndWipe(t *testing.T) {
 	d := newDocs(t)
-	a, _ := d.Add("a.md", "alpha content here")
-	d.Add("b.md", "bravo content here")
+	a, _ := d.AddText("a.md", "alpha content here")
+	d.AddText("b.md", "bravo content here")
 
 	if err := d.Delete(a.ID); err != nil {
 		t.Fatalf("Delete: %v", err)
@@ -84,7 +79,7 @@ func TestDeleteAndWipe(t *testing.T) {
 // Deleting a document must remove it from search too, not just from the list.
 func TestDeletedDocumentLeavesTheIndex(t *testing.T) {
 	d := newDocs(t)
-	m, _ := d.Add("secret.md", "the passphrase is hunter2 pomegranate")
+	m, _ := d.AddText("secret.md", "the passphrase is hunter2 pomegranate")
 	ix := buildIndex(t, d)
 	if len(ix.Search("pomegranate", 3)) == 0 {
 		t.Fatal("document not searchable after add")
@@ -98,7 +93,7 @@ func TestDeletedDocumentLeavesTheIndex(t *testing.T) {
 
 func TestUnreadableDocumentDoesNotBreakTheCorpus(t *testing.T) {
 	d := newDocs(t)
-	d.Add("good.md", "searchable content about drives")
+	d.AddText("good.md", "searchable content about drives")
 	// A file with no header line — a truncated or hand-edited document.
 	if err := writeRaw(d.dir+"/20260101-000000-zzzz.doc", "no header at all"); err != nil {
 		t.Fatal(err)

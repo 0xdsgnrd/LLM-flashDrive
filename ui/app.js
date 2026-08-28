@@ -487,7 +487,8 @@ async function refreshDocs() {
     box.appendChild(row);
   }
   if (!list.length) {
-    box.innerHTML = '<div class="docs-empty">None yet — add text files to search them.</div>';
+    box.innerHTML = '<div class="docs-empty">None yet — add text, PDF, Office ' +
+      'or archive files to search them.</div>';
   }
 
   $('docs-label').textContent = list.length ? `Documents (${list.length})` : 'Documents';
@@ -499,12 +500,22 @@ async function refreshDocs() {
   return list;
 }
 
-function docsError(msg) {
-  const el = document.createElement('div');
-  el.className = 'docs-error';
-  el.textContent = msg;
-  $('doc-list').prepend(el);
-  setTimeout(() => el.remove(), 7000);
+function docsError(msg) { docsMessage(msg, 'docs-error'); }
+function docsNote(msg) { docsMessage(msg, 'docs-note'); }
+
+// Queued rather than shown immediately: these are raised mid-upload, before the
+// refreshDocs() that would erase them.
+const pendingNotes = [];
+function docsMessage(msg, cls) { pendingNotes.push([msg, cls]); }
+
+function flushDocsMessages() {
+  for (const [msg, cls] of pendingNotes.splice(0)) {
+    const el = document.createElement('div');
+    el.className = cls;
+    el.textContent = msg;
+    $('doc-list').prepend(el);
+    setTimeout(() => el.remove(), 7000);
+  }
 }
 
 async function addDocs(files) {
@@ -514,17 +525,25 @@ async function addDocs(files) {
   // be read. Drop a PDF in and the explanation has to outlive the refresh.
   const errors = [];
   for (const f of files) {
-    let text;
-    try { text = await f.text(); }
-    catch { errors.push(`Could not read ${f.name}.`); continue; }
     try {
-      await api('/docs', { method: 'POST', body: JSON.stringify({ name: f.name, content: text }) });
+      // The File goes into the body as-is. Reading it to a string first would
+      // corrupt every binary format, and base64 would inflate each upload by a
+      // third for nothing. pocketd works out the format from ?name=.
+      const added = await api('/docs?name=' + encodeURIComponent(f.name), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: f,
+      });
+      // An archive comes back as one document per member; say so, because the
+      // sidebar suddenly growing by nine entries otherwise looks like a bug.
+      if (added.length > 1) docsNote(`${f.name}: added ${added.length} files from the archive.`);
     } catch (err) {
       errors.push(`${f.name}: ${err.message}`);
     }
   }
   await refreshDocs();
   errors.forEach(docsError);
+  flushDocsMessages();
 }
 
 /* ---------- wiring ---------- */

@@ -8,23 +8,23 @@
 # that shaped the llama.cpp builds simply do not apply.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-GO_IMAGE="${GO_IMAGE:-golang:1.23-alpine}"
+GO_IMAGE="${GO_IMAGE:-golang:1.24-alpine}"
 VERSION="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo dev)"
 git -C "$ROOT" diff --quiet 2>/dev/null || VERSION="$VERSION-dirty"
 
 docker run --rm -v "$ROOT/helper:/src" -v "$ROOT/dist:/out" -w /src \
-  -e CGO_ENABLED=0 -e GOFLAGS=-trimpath "$GO_IMAGE" sh -euc '
+  -e CGO_ENABLED=0 -e GOFLAGS=-trimpath -e GOFLAGS_NOSUMDB=1 "$GO_IMAGE" sh -euc '
     echo "── fmt + vet + test ──"
-    unformatted=$(gofmt -l .); [ -z "$unformatted" ] || { echo "gofmt needed: $unformatted"; exit 1; }
-    go vet ./...
-    go test ./...
+    unformatted=$(gofmt -l *.go); [ -z "$unformatted" ] || { echo "gofmt needed: $unformatted"; exit 1; }
+    go vet -mod=vendor ./...
+    go test -mod=vendor ./...
     echo "── build ──"
     for t in "darwin arm64 mac-arm64 pocketd" \
              "linux  amd64 linux-x64 pocketd" \
              "windows amd64 win-x64  pocketd.exe"; do
       set -- $t
       mkdir -p "/out/$3"
-      GOOS=$1 GOARCH=$2 go build -ldflags "-s -w -X main.version='"$VERSION"'" -o "/out/$3/$4" .
+      GOOS=$1 GOARCH=$2 go build -mod=vendor -ldflags "-s -w -X main.version='"$VERSION"'" -o "/out/$3/$4" .
       echo "  ✓ $3/$4"
     done
   '

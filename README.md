@@ -122,18 +122,45 @@ Some deliberate details:
 - **The retrieved block is never stored.** It is prepended to a single request and
   never enters the transcript, so it is not replayed on the next turn and does not
   eat context forever. Only the document *names* are saved, as the citation line.
-- **Text only.** PDF and Word are refused with a message saying so rather than
-  indexed as line noise — a NUL byte or a run of control characters is enough to
-  tell. PDF support means a parser, which is the next real piece of work.
+- **Formats are extracted, not guessed at.** See the table below.
 - **Retrieval failing never blocks an answer.** If search errors, the question
   goes to the model ungrounded.
+
+### What can be added
+
+| Format | Handled by |
+|---|---|
+| `.txt` `.md` `.csv` `.json` `.log` `.css`, source files, anything that reads as text | read directly |
+| `.pdf` | `github.com/ledongthuc/pdf`, vendored |
+| `.docx` `.pptx` `.xlsx` | `archive/zip` + `encoding/xml` |
+| `.rtf` `.html` `.xml` | text stripping |
+| `.zip` `.tar` `.tar.gz` `.tgz` | one document per member, named `archive.zip → path/inside.md` |
+
+`.pdf` is the only dependency in the project; everything else here is stdlib. It
+is vendored under `helper/vendor/` (BSD-3, Go Authors — licence retained there)
+so the build needs no network and cannot drift.
+Uploads are raw bytes with the name in the query string — reading a file to a
+string in the browser would corrupt every binary format, and base64 would inflate
+each upload by a third for nothing.
+
+**Refused on purpose, by name:** `.doc`, `.ppt`, `.xls` are OLE compound binaries
+with no usable Go extractor — the app says "re-save it as .docx" rather than
+failing vaguely. `.rar` and `.7z` would each mean shipping a whole decompressor
+for a format people rarely hand over; extract them first. A **scanned PDF** with
+no text layer is detected and reported as needing OCR, which is not obvious to
+someone looking at a page full of visible words.
+
+Some deliberate limits: archives nested inside archives are not unpacked (that is
+where a decompression bomb hides), at most 300 members and 64MB of extracted text
+per upload, `__MACOSX/` and dotfiles are skipped, and `<script>`/`<style>` never
+reach the index — minified JavaScript would otherwise flood it with junk tokens.
 
 ## Layout
 
 ```
 repo (internal SSD — never develop on exFAT)
 ├── ui/                     zero-dependency chat UI (no CDN, works offline)
-├── helper/                 pocketd — front door, proxy, storage, BM25 search (Go, stdlib only)
+├── helper/                 pocketd — front door, proxy, storage, extraction, BM25 search (Go)
 ├── runtime/                launchers + erase scripts, copied to the drive
 ├── docker/                 dev image + linux/windows cross-build images
 ├── scripts/
@@ -220,6 +247,8 @@ A drive holding only a 70B is useless on the 16GB laptops most people own.
   binary with no libc dependency at all, so there is no glibc version to match, no
   `libgomp`, and no mingw threading model to get wrong. It is the cheap half of
   the build.
+- **Its one dependency is vendored** (`helper/vendor/`) and built with
+  `-mod=vendor`, so the build needs no network and cannot drift.
 - **CRLF for `.bat`/`.ps1`, LF for `.sh`/`.command`** — enforced in `runtime/`.
 - **Quarantine stripped** at release, so Gatekeeper doesn't block on other Macs.
 - **`-ExecutionPolicy Bypass`** so the PowerShell launcher runs without admin.

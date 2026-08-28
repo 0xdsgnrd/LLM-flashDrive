@@ -27,9 +27,9 @@ func buildIndex(t *testing.T, d *DocStore) *Index {
 
 func TestSearchRanksTheRelevantDocumentFirst(t *testing.T) {
 	d := newDocs(t)
-	d.Add("ejecting.md", "To remove the drive safely, always eject it first.\n\nexFAT has no journal, so an interrupted write can corrupt a file.")
-	d.Add("baking.md", "Preheat the oven to 200 degrees. Whisk the eggs and the sugar together until pale.")
-	d.Add("models.md", "Quantisation shrinks a model by storing weights at lower precision, trading a little quality for a lot of memory.")
+	d.AddText("ejecting.md", "To remove the drive safely, always eject it first.\n\nexFAT has no journal, so an interrupted write can corrupt a file.")
+	d.AddText("baking.md", "Preheat the oven to 200 degrees. Whisk the eggs and the sugar together until pale.")
+	d.AddText("models.md", "Quantisation shrinks a model by storing weights at lower precision, trading a little quality for a lot of memory.")
 
 	ix := buildIndex(t, d)
 	hits := ix.Search("why should I eject the drive", 3)
@@ -48,7 +48,7 @@ func TestSearchRanksTheRelevantDocumentFirst(t *testing.T) {
 
 func TestSearchReturnsNothingForUnrelatedQuery(t *testing.T) {
 	d := newDocs(t)
-	d.Add("a.md", "the drive must be ejected before removal")
+	d.AddText("a.md", "the drive must be ejected before removal")
 	ix := buildIndex(t, d)
 	if hits := ix.Search("xylophone marsupial", 3); len(hits) != 0 {
 		t.Errorf("expected no hits, got %+v", hits)
@@ -67,8 +67,8 @@ func TestSearchCapsHitsPerDocument(t *testing.T) {
 		big.WriteString(strings.Repeat("filler sentence about ejecting drives. ", 25))
 		big.WriteString("\n\n")
 	}
-	d.Add("long.md", big.String())
-	d.Add("short.md", "Ejecting the drive flushes pending writes.")
+	d.AddText("long.md", big.String())
+	d.AddText("short.md", "Ejecting the drive flushes pending writes.")
 
 	ix := buildIndex(t, d)
 	hits := ix.Search("ejecting the drive", 6)
@@ -87,7 +87,7 @@ func TestSearchCapsHitsPerDocument(t *testing.T) {
 func TestSearchIsDeterministic(t *testing.T) {
 	d := newDocs(t)
 	for _, s := range []string{"drive drive", "drive drive", "drive drive"} {
-		d.Add("same.md", s)
+		d.AddText("same.md", s)
 	}
 	ix := buildIndex(t, d)
 	first := ix.Search("drive", 3)

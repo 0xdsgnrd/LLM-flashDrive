@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -206,28 +208,60 @@ func (a *API) docs(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, out)
 
 	case http.MethodPost:
-		var body struct {
-			Name    string `json:"name"`
-			Content string `json:"content"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expected {name, content}"})
+		// The body is the file itself, raw. Base64 in JSON would inflate every
+		// upload by a third for no gain, and the browser can stream a File
+		// straight into fetch().
+		name := r.URL.Query().Get("name")
+		if strings.TrimSpace(name) == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing ?name="})
 			return
 		}
-		m, err := a.Docs.Add(body.Name, body.Content)
+		data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxUploadBytes))
 		if err != nil {
-			// A rejected file is the user's mistake to correct, not a server
-			// fault — say which file and why, so the UI can name it.
-			code := http.StatusBadRequest
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
+				"error": fmt.Sprintf("file is larger than %dMB", maxUploadBytes>>20), "name": name,
+			})
+			return
+		}
+
+		// One file can become several documents: an archive yields one per
+		// member. Partial success is the useful outcome — a zip with two
+		// readable files and one dud should add the two.
+		parts, err := Extract(name, data)
+		if err != nil {
 			msg := err.Error()
 			if errors.Is(err, ErrNotText) {
-				msg = "only text files can be indexed (PDF and Word are not supported yet)"
+				msg = "this file is not text and its format is not supported"
 			}
-			writeJSON(w, code, map[string]string{"error": msg, "name": body.Name})
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg, "name": name})
+			return
+		}
+
+		added := []DocInfo{}
+		var firstErr error
+		for _, p := range parts {
+			m, err := a.Docs.AddText(p.Name, p.Text)
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			added = append(added, DocInfo{DocMeta: m})
+		}
+		if len(added) == 0 {
+			msg := "no text could be read from it"
+			if firstErr != nil {
+				msg = firstErr.Error()
+			}
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg, "name": name})
 			return
 		}
 		a.reindex()
-		writeJSON(w, http.StatusOK, DocInfo{DocMeta: m, Chunks: a.Index.ChunksFor(m.ID)})
+		for i := range added {
+			added[i].Chunks = a.Index.ChunksFor(added[i].ID)
+		}
+		writeJSON(w, http.StatusOK, added)
 
 	case http.MethodDelete:
 		n, err := a.Docs.Wipe()
