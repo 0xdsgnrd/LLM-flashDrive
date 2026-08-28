@@ -10,8 +10,18 @@
 # file at the right length.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DRIVE="${DRIVE:-/Volumes/ai-Drive}"
-LOCK="${LOCK:-$ROOT/drive.lock}"
+# When this script sits ON the drive (release.sh stages it there), its own
+# directory IS the drive — whatever the stick happens to mount as. Only fall
+# back to the hardcoded path when running from a repo checkout.
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -n "${DRIVE:-}" ]; then :
+elif [ -d "$SELF_DIR/models" ] && [ -f "$SELF_DIR/drive.lock" ]; then DRIVE="$SELF_DIR"
+else DRIVE="/Volumes/ai-Drive"; fi
+# Prefer the repo's lock, but fall back to the one release.sh stages on the
+# drive — on a machine with no checkout, that copy is the only lock there is.
+if [ -n "${LOCK:-}" ];            then :
+elif [ -f "$ROOT/drive.lock" ];   then LOCK="$ROOT/drive.lock"
+else                                   LOCK="$DRIVE/drive.lock"; fi
 CHECK_SHA=0
 [ "${1:-}" = "--sha" ] && CHECK_SHA=1
 
@@ -112,6 +122,11 @@ if [ $FAIL -ne 0 ]; then
   [ $CHECK_SHA -eq 0 ] && echo "    (size-only check — run with --sha to catch same-size corruption)"
   exit 1
 fi
-[ $CHECK_SHA -eq 1 ] && echo "  ✓ drive matches the lock (content verified)" \
-                     || echo "  ✓ sizes match the lock (run --sha to verify content)"
+# A partial drive is legitimate — you may deliberately carry only some models —
+# so missing entries are not a failure. But do not let the summary read as
+# "fully verified" when most of the lock is absent.
+SCOPE="drive matches the lock"
+[ $MISSING -gt 0 ] && SCOPE="the $OK model(s) present match the lock ($MISSING not downloaded)"
+[ $CHECK_SHA -eq 1 ] && echo "  ✓ $SCOPE (content verified)" \
+                     || echo "  ✓ $SCOPE (sizes only — run --sha to verify content)"
 exit 0

@@ -54,6 +54,13 @@ if [ -f "$ROOT/drive.lock" ]; then
     echo "# staged from  $(hostname -s 2>/dev/null || echo unknown)"
   } > "$DRIVE/drive.lock"
   echo "  ✓ drive.lock ($(grep -c '^model' "$ROOT/drive.lock") models pinned)"
+  # Stage the verifier too. A lock nobody can check is just a text file, and on
+  # a machine with no checkout this is the only copy of either.
+  if [ -f "$ROOT/scripts/verify-drive.sh" ]; then
+    cp -f "$ROOT/scripts/verify-drive.sh" "$DRIVE/verify-drive.sh"
+    chmod +x "$DRIVE/verify-drive.sh" 2>/dev/null || true
+    echo "  ✓ verify-drive.sh"
+  fi
 else
   echo "  · drive.lock  (absent — drive will not record its own provenance)"
 fi
