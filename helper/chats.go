@@ -34,6 +34,9 @@ type Msg struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 	TS      string `json:"ts,omitempty"`
+	// Documents the answer was grounded in, when retrieval was used. omitempty
+	// keeps every transcript written before this existed readable unchanged.
+	Sources []string `json:"sources,omitempty"`
 }
 
 type Meta struct {

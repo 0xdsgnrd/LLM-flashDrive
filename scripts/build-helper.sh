@@ -14,7 +14,8 @@ git -C "$ROOT" diff --quiet 2>/dev/null || VERSION="$VERSION-dirty"
 
 docker run --rm -v "$ROOT/helper:/src" -v "$ROOT/dist:/out" -w /src \
   -e CGO_ENABLED=0 -e GOFLAGS=-trimpath "$GO_IMAGE" sh -euc '
-    echo "── vet + test ──"
+    echo "── fmt + vet + test ──"
+    unformatted=$(gofmt -l .); [ -z "$unformatted" ] || { echo "gofmt needed: $unformatted"; exit 1; }
     go vet ./...
     go test ./...
     echo "── build ──"

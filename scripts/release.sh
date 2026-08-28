@@ -9,7 +9,7 @@ DRIVE="${DRIVE:-/Volumes/Pocket-LLM}"
 [ -w "$DRIVE" ] || { echo "✗ $DRIVE is not writable"; exit 1; }
 
 echo "Staging → $DRIVE"
-mkdir -p "$DRIVE"/{bin/{mac-arm64,linux-x64,win-x64},models,ui,logs,chats}
+mkdir -p "$DRIVE"/{bin/{mac-arm64,linux-x64,win-x64},models,ui,logs,chats,docs}
 
 # --- binaries (only those that have been built) ------------------------
 staged=0
@@ -36,8 +36,9 @@ echo "  ✓ ui/"
 # --- launchers (line endings matter: LF for unix, CRLF for windows) -----
 cp -f "$ROOT/runtime/run-mac.command" "$ROOT/runtime/run-linux.sh" "$DRIVE/"
 cp -f "$ROOT/runtime/run-windows.bat" "$ROOT/runtime/run-windows.ps1" "$DRIVE/"
-cp -f "$ROOT/runtime/erase-chats.command" "$DRIVE/"
-chmod +x "$DRIVE/run-mac.command" "$DRIVE/run-linux.sh" "$DRIVE/erase-chats.command" 2>/dev/null || true
+cp -f "$ROOT/runtime/erase-chats.command" "$ROOT/runtime/erase-documents.command" "$DRIVE/"
+chmod +x "$DRIVE/run-mac.command" "$DRIVE/run-linux.sh" \
+         "$DRIVE/erase-chats.command" "$DRIVE/erase-documents.command" 2>/dev/null || true
 echo "  ✓ launchers"
 
 # --- provenance --------------------------------------------------------
@@ -66,12 +67,16 @@ else
   echo "  · drive.lock  (absent — drive will not record its own provenance)"
 fi
 
-# --- conversations -----------------------------------------------------
-# chats/ is created above and then left completely alone. It is the user's data,
-# written only by pocketd on the drive; a release must never stage over it and
-# never quietly erase it. Use the app's erase button or erase-chats.command.
+# --- user data ---------------------------------------------------------
+# chats/ and docs/ are created above and then left completely alone. They are
+# the user's data, written only by pocketd on the drive; a release must never
+# stage over them and never quietly erase them. Use the app, or the
+# erase-chats / erase-documents scripts.
 if compgen -G "$DRIVE/chats/*.jsonl" >/dev/null 2>&1; then
   echo "  · chats/ ($(ls "$DRIVE"/chats/*.jsonl | wc -l | tr -d ' ') conversation(s) — untouched)"
+fi
+if compgen -G "$DRIVE/docs/*.doc" >/dev/null 2>&1; then
+  echo "  · docs/  ($(ls "$DRIVE"/docs/*.doc | wc -l | tr -d ' ') document(s) — untouched)"
 fi
 
 # --- hygiene -----------------------------------------------------------

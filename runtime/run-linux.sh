@@ -82,6 +82,7 @@ free_port() { local p=$1; while ss -ltn 2>/dev/null | grep -q ":$p " ; do p=$((p
 PORT=$(free_port 8080)
 HELPER="$DIR/bin/linux-x64/pocketd"
 CHATS="$DIR/chats"
+DOCS="$DIR/docs"
 
 if [ -x "$HELPER" ]; then
   LLAMA_PORT=$(free_port $((PORT + 1)))
@@ -107,7 +108,8 @@ ARGS=(--models-dir "$MODELS" --host 127.0.0.1 --port "$LLAMA_PORT"
 PID=$!
 HPID=""
 if [ -x "$HELPER" ]; then
-  "$HELPER" -port "$PORT" -ui "$UI" -chats "$CHATS" -upstream "127.0.0.1:$LLAMA_PORT" \
+  "$HELPER" -port "$PORT" -ui "$UI" -chats "$CHATS" -docs "$DOCS" \
+      -upstream "127.0.0.1:$LLAMA_PORT" \
       > "$DIR/logs/pocketd.log" 2>&1 &
   HPID=$!
 fi

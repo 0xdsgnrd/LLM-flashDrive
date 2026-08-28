@@ -78,6 +78,7 @@ function Get-FreePort([int]$Start) {
 $Port      = Get-FreePort 8080
 $Helper    = Join-Path $Dir 'bin\win-x64\pocketd.exe'
 $Chats     = Join-Path $Dir 'chats'
+$Docs      = Join-Path $Dir 'docs'
 $HasHelper = Test-Path $Helper
 
 if ($HasHelper) {
@@ -111,7 +112,7 @@ if ($HasHelper) {
     $helperProc = Start-Process -FilePath $Helper -PassThru -NoNewWindow `
         -RedirectStandardOutput (Join-Path $Dir 'logs\pocketd.log') `
         -RedirectStandardError  (Join-Path $Dir 'logs\pocketd.err.log') `
-        -ArgumentList @('-port', $Port, '-ui', $Ui, '-chats', $Chats,
+        -ArgumentList @('-port', $Port, '-ui', $Ui, '-chats', $Chats, '-docs', $Docs,
                         '-upstream', "127.0.0.1:$LlamaPort")
 }
 

@@ -11,6 +11,20 @@
   <div class="brand">Pocket&nbsp;LLM</div>
   <button id="new-chat">＋ New chat</button>
   <div id="chats" class="chats"></div>
+
+  <div class="docs">
+    <div class="docs-head">
+      <span id="docs-label">Documents</span>
+      <button id="add-docs" title="Add text files to search">＋ Add</button>
+    </div>
+    <div id="doc-list" class="doc-list"></div>
+    <label class="use-docs" title="Search your documents and give the model what it finds">
+      <input type="checkbox" id="use-docs" disabled> Use in answers
+    </label>
+  </div>
+  <input type="file" id="doc-input" multiple hidden
+         accept=".txt,.md,.markdown,.mdx,.csv,.tsv,.json,.log,.text,.rst,.org">
+
   <div class="meta">
     <div class="row model-row"><span>Model</span></div>
     <select id="model-select" title="Choose a model"><option>loading…</option></select>

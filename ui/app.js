@@ -8,6 +8,8 @@ let history = [];
 let controller = null;
 let currentModel = null;      // null => let the server choose
 let savedModel = null;        // preference read back from the drive, not localStorage
+let searchOn = false;         // pocketd can store and index documents
+let useDocs = false;          // ...and the user wants answers grounded in them
 
 /* ---------- rendering ---------- */
 
@@ -63,12 +65,19 @@ function renderTurn(reasoning, content, streaming) {
   return html + render(content);
 }
 
-function addMessage(role, text) {
+// Citations are rendered from the message itself, so they survive a reload
+// rather than existing only in the live view.
+function sourcesHTML(sources) {
+  if (!sources?.length) return '';
+  return `<div class="sources"><b>Sources:</b> ${sources.map(esc).join(' · ')}</div>`;
+}
+
+function addMessage(role, text, sources) {
   msgs.querySelector('.empty')?.remove();
   const el = document.createElement('div');
   el.className = `msg ${role}`;
   el.innerHTML = `<div class="who">${role === 'user' ? 'You' : 'AI'}</div><div class="body"></div>`;
-  el.querySelector('.body').innerHTML = render(text);
+  el.querySelector('.body').innerHTML = render(text) + sourcesHTML(sources);
   msgs.appendChild(el);
   msgs.scrollTop = msgs.scrollHeight;
   return el.querySelector('.body');
@@ -230,6 +239,28 @@ async function send(text) {
   let tokens = 0;
   const t0 = performance.now();
 
+  // Retrieval runs against the question actually asked, not the whole thread:
+  // dragging the entire history into the query buries the current topic under
+  // everything discussed before it.
+  let grounding = null;
+  let sources = [];
+  if (useDocs && searchOn) {
+    try {
+      const hits = await api('/search?k=4&q=' + encodeURIComponent(text));
+      if (hits.length) {
+        sources = [...new Set(hits.map((h) => h.docName))];
+        grounding = {
+          role: 'system',
+          content:
+            'Use the excerpts below when they answer the question. If they do not, ' +
+            'say so plainly and answer from your own knowledge — never invent a citation ' +
+            'or attribute something to a document that does not say it.\n\n' +
+            hits.map((h, i) => `[${i + 1}] ${h.docName}\n${h.text}`).join('\n\n'),
+        };
+      }
+    } catch { /* retrieval is an enhancement; a failure must not block the answer */ }
+  }
+
   try {
     const res = await fetch('/v1/chat/completions', {
       method: 'POST',
@@ -237,9 +268,13 @@ async function send(text) {
       signal: controller.signal,
       // No max_tokens: capping a reasoning model truncates it mid-thought and
       // yields an empty answer (see 93e2468).
+      // The grounding block is prepended for this one request only. It is
+      // never pushed into `history`, so it is not stored, not replayed on the
+      // next turn, and not re-sent once it has served its purpose.
       body: JSON.stringify({
         ...(currentModel ? { model: currentModel } : {}),
-        messages: history, stream: true, temperature: 0.7,
+        messages: grounding ? [grounding, ...history] : history,
+        stream: true, temperature: 0.7,
       }),
     });
     if (!res.ok) throw new Error(`server returned ${res.status}`);
@@ -275,7 +310,7 @@ async function send(text) {
     // Reasoning is deliberately NOT pushed to history — models are trained to
     // see only prior answers, and replaying it wastes context every turn.
     history.push({ role: 'assistant', content: acc });
-    await record('assistant', acc);
+    await record('assistant', acc, sources);
     refreshChats();
   } catch (err) {
     if (err.name !== 'AbortError') {
@@ -283,7 +318,7 @@ async function send(text) {
       probe();
     }
   } finally {
-    body.innerHTML = renderTurn(reasoning, acc, false);
+    body.innerHTML = renderTurn(reasoning, acc, false) + sourcesHTML(sources);
     $('send').disabled = false;
     $('stop').hidden = true;
     controller = null;
@@ -304,14 +339,26 @@ async function api(path, opts = {}) {
   const r = await fetch('/api' + path, {
     headers: { 'Content-Type': 'application/json' }, ...opts,
   });
-  if (!r.ok) throw new Error(`${path} → ${r.status}`);
+  if (!r.ok) {
+    // pocketd explains refusals in the body ("only text files can be indexed").
+    // Losing that and reporting a bare 400 would make every rejection look the same.
+    let detail = '';
+    try { detail = (await r.json()).error ?? ''; } catch {}
+    const e = new Error(detail || `${path} → ${r.status}`);
+    e.status = r.status;
+    throw e;
+  }
   return r.json();
 }
 
-async function initHistory() {
-  try {
-    historyOn = !!(await api('/health')).history;
-  } catch { historyOn = false; }
+let settings = {};
+function saveSettings() {
+  if (!historyOn) return;
+  api('/settings', { method: 'PUT', body: JSON.stringify(settings) }).catch(() => {});
+}
+
+async function initHistory(health) {
+  historyOn = !!health?.history;
 
   $('erase-all').hidden = !historyOn;
   if (!historyOn) {
@@ -319,7 +366,9 @@ async function initHistory() {
       'can\u2019t save to the drive. Conversations will be lost when you close the window.</div>';
     return;
   }
-  try { savedModel = (await api('/settings')).model ?? null; } catch {}
+  try { settings = await api('/settings'); } catch { settings = {}; }
+  savedModel = settings.model ?? null;
+  useDocs = !!settings.useDocs;
 
   // Pick up where the last session stopped, the way restoring from browser
   // storage used to — only now it follows the drive, not the machine.
@@ -355,9 +404,11 @@ async function openChat(id) {
   let c;
   try { c = await api('/chats/' + id); } catch { return; }
   chatId = c.id;
+  // `history` is what gets replayed to the model, so it carries role and
+  // content only — sources are for the reader, not for the prompt.
   history = c.messages.map(({ role, content }) => ({ role, content }));
   msgs.innerHTML = '';
-  if (history.length) history.forEach((m) => addMessage(m.role, m.content));
+  if (c.messages.length) c.messages.forEach((m) => addMessage(m.role, m.content, m.sources));
   else emptyState();
   refreshChats();
 }
@@ -373,10 +424,13 @@ async function ensureChat() {
   } catch { historyOn = false; }
 }
 
-async function record(role, content) {
+async function record(role, content, sources) {
   if (!historyOn || !chatId) return;
   try {
-    await api('/chats/' + chatId, { method: 'POST', body: JSON.stringify({ role, content }) });
+    await api('/chats/' + chatId, {
+      method: 'POST',
+      body: JSON.stringify({ role, content, ...(sources?.length ? { sources } : {}) }),
+    });
   } catch {}
 }
 
@@ -392,6 +446,85 @@ function newChat() {
   emptyState();
   $('tps').textContent = '—';
   refreshChats();
+}
+
+/* ---------- documents (retrieval) ---------- */
+
+// Retrieval is lexical (BM25) inside pocketd. No embedding model on the drive,
+// no second llama-server, nothing added to drive.lock — and for searching your
+// own notes the words you ask with are usually the words you wrote. It will not
+// match "car" against a document that only says "automobile"; that is the
+// upgrade path, not a bug.
+async function initDocs(health) {
+  searchOn = !!health?.search;
+  if (!searchOn) {
+    $('add-docs').hidden = true;
+    $('doc-list').innerHTML =
+      '<div class="docs-empty">Unavailable — the drive can\u2019t be written to here.</div>';
+    return;
+  }
+  await refreshDocs();
+}
+
+async function refreshDocs() {
+  if (!searchOn) return [];
+  let list;
+  try { list = await api('/docs'); } catch { return []; }
+
+  const box = $('doc-list');
+  box.innerHTML = '';
+  for (const d of list) {
+    const row = document.createElement('div');
+    row.className = 'doc-row';
+    row.innerHTML =
+      `<span class="doc-name" title="${esc(d.name)} — ${d.chunks} passage(s) indexed">` +
+        `${esc(d.name)}</span>` +
+      `<button class="doc-del" title="Remove this document from the drive">×</button>`;
+    row.querySelector('.doc-del').onclick = async () => {
+      try { await api('/docs/' + d.id, { method: 'DELETE' }); } catch {}
+      refreshDocs();
+    };
+    box.appendChild(row);
+  }
+  if (!list.length) {
+    box.innerHTML = '<div class="docs-empty">None yet — add text files to search them.</div>';
+  }
+
+  $('docs-label').textContent = list.length ? `Documents (${list.length})` : 'Documents';
+  const toggle = $('use-docs');
+  toggle.disabled = list.length === 0;
+  // Nothing to ground an answer in means the switch would be a lie.
+  if (!list.length) useDocs = false;
+  toggle.checked = useDocs;
+  return list;
+}
+
+function docsError(msg) {
+  const el = document.createElement('div');
+  el.className = 'docs-error';
+  el.textContent = msg;
+  $('doc-list').prepend(el);
+  setTimeout(() => el.remove(), 7000);
+}
+
+async function addDocs(files) {
+  if (!searchOn) return;
+  // Errors are collected, not shown as they happen: refreshDocs() rebuilds the
+  // list from scratch, so anything written into it first is wiped before it can
+  // be read. Drop a PDF in and the explanation has to outlive the refresh.
+  const errors = [];
+  for (const f of files) {
+    let text;
+    try { text = await f.text(); }
+    catch { errors.push(`Could not read ${f.name}.`); continue; }
+    try {
+      await api('/docs', { method: 'POST', body: JSON.stringify({ name: f.name, content: text }) });
+    } catch (err) {
+      errors.push(`${f.name}: ${err.message}`);
+    }
+  }
+  await refreshDocs();
+  errors.forEach(docsError);
 }
 
 /* ---------- wiring ---------- */
@@ -416,10 +549,8 @@ $('stop').addEventListener('click', () => controller?.abort());
 $('model-select').addEventListener('change', (e) => {
   currentModel = e.target.value;
   savedModel = currentModel;
-  if (historyOn) {
-    api('/settings', { method: 'PUT', body: JSON.stringify({ model: currentModel }) })
-      .catch(() => {});
-  }
+  settings.model = currentModel;
+  saveSettings();
   // Chat templates and tokenizers differ per model; replaying one model's
   // transcript into another produces confused output. Start clean.
   newChat();
@@ -446,8 +577,33 @@ $('erase-all').addEventListener('click', async () => {
   newChat();
 });
 
+$('add-docs').addEventListener('click', () => $('doc-input').click());
+$('doc-input').addEventListener('change', async (e) => {
+  const files = [...e.target.files];
+  e.target.value = '';        // so the same file can be added again after a delete
+  await addDocs(files);
+});
+$('use-docs').addEventListener('change', (e) => {
+  useDocs = e.target.checked;
+  settings.useDocs = useDocs;
+  saveSettings();
+});
+
+// Dropping files anywhere on the window is the gesture people reach for first.
+// preventDefault on both events matters: without it the browser navigates away
+// to the dropped file and the session is gone.
+document.addEventListener('dragover', (e) => e.preventDefault());
+document.addEventListener('drop', (e) => {
+  e.preventDefault();
+  const files = [...(e.dataTransfer?.files ?? [])];
+  if (files.length) addDocs(files);
+});
+
 (async () => {
-  await initHistory();
+  let health = {};
+  try { health = await api('/health'); } catch {}
+  await initHistory(health);
+  await initDocs(health);
   await probe();
   setInterval(probe, 5000);
 })();

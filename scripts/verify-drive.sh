@@ -120,6 +120,14 @@ else
   printf '  ✓  chats/  empty\n'
 fi
 
+NDOC=0
+for f in "$DRIVE"/docs/*.doc; do [ -e "$f" ] && NDOC=$((NDOC+1)); done
+if [ "$NDOC" -gt 0 ]; then
+  printf '  !  docs/   %s indexed document(s) — erase before handing the drive on\n' "$NDOC"
+else
+  printf '  ✓  docs/   empty\n'
+fi
+
 # The host's own binary can be run, so check it was built from the pinned
 # commit. The cross-compiled ones cannot be executed here.
 WANT_COMMIT=$(awk '$1=="llama_commit"{print $2}' "$LOCK")

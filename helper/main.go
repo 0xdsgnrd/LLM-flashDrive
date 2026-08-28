@@ -45,6 +45,7 @@ func main() {
 		port     = flag.Int("port", 8080, "port to listen on")
 		uiDir    = flag.String("ui", "ui", "directory of static UI files")
 		chatsDir = flag.String("chats", "chats", "directory for saved conversations")
+		docsDir  = flag.String("docs", "docs", "directory for indexed documents")
 		upstream = flag.String("upstream", "127.0.0.1:8081", "llama-server host:port")
 		showVer  = flag.Bool("version", false, "print version and exit")
 	)
@@ -67,6 +68,23 @@ func main() {
 		store = nil
 	}
 
+	docs, err := NewDocStore(*docsDir)
+	if err != nil {
+		log.Printf("pocketd: document storage unavailable (%v) — search disabled", err)
+		docs = nil
+	}
+	index := NewIndex()
+	if docs != nil {
+		// Built at startup from the documents themselves. There is no index
+		// file to load, so there is nothing to be stale or half-written.
+		if metas, texts, err := docs.All(); err == nil {
+			index.Build(metas, texts)
+			if d, c := index.Stats(); d > 0 {
+				log.Printf("pocketd: indexed %d document(s), %d chunk(s)", d, c)
+			}
+		}
+	}
+
 	target, err := url.Parse("http://" + *upstream)
 	if err != nil {
 		log.Fatalf("pocketd: bad -upstream %q: %v", *upstream, err)
@@ -82,7 +100,7 @@ func main() {
 		})
 	}
 
-	api := &API{Store: store}
+	api := &API{Store: store, Docs: docs, Index: index}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -96,8 +114,8 @@ func main() {
 	})
 
 	addr := fmt.Sprintf("127.0.0.1:%d", *port)
-	log.Printf("pocketd %s: ui %s · chats %s · upstream %s · listening on %s",
-		version, absUI, *chatsDir, *upstream, addr)
+	log.Printf("pocketd %s: ui %s · chats %s · docs %s · upstream %s · listening on %s",
+		version, absUI, *chatsDir, *docsDir, *upstream, addr)
 	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Fatalf("pocketd: %v", err)
 	}

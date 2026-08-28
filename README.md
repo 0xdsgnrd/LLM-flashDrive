@@ -48,7 +48,9 @@ helper is present:
 
 ```
 with pocketd            browser → pocketd :8080 ─┬─ ui/            (static)
-                                                 ├─ /api/*         (conversations)
+                                                 ├─ /api/chats     (conversations)
+                                                 ├─ /api/docs      (documents)
+                                                 ├─ /api/search    (BM25 retrieval)
                                                  └─ /v1/*  ──► llama-server :8081
 
 without it              browser → llama-server :8080 ── ui/ + /v1/*   (history off)
@@ -80,21 +82,59 @@ and the sidebar says history is off. It does *not* quietly fall back to browser
 storage, because that is precisely the behaviour being removed.
 
 ```bash
-./erase-chats.command      # on the drive: erase every conversation
+./erase-chats.command       # on the drive: erase every conversation
+./erase-documents.command   # ...and every indexed document, separately
 ```
 
-The app's sidebar has the same button, and `verify-drive.sh` reports how many
-conversations are on the drive so you know before handing it to someone. This is
-a plain delete: exFAT does not overwrite the bytes, so it defends against the next
-person to plug the drive in, not against someone with recovery tools.
+The app's sidebar has the same buttons, and `verify-drive.sh` reports how many
+conversations and documents are on the drive so you know before handing it to
+someone. This is a plain delete: exFAT does not overwrite the bytes, so it defends
+against the next person to plug the drive in, not against someone with recovery
+tools. The two are separate on purpose — a reference set you are happy to pass on
+is a different thing from your conversations.
+
+## Retrieval, and why it is lexical
+
+Drop text files onto the window, tick **Use in answers**, and each question is
+searched against them first; the best passages are prepended to that one request
+and the answer cites which documents it used.
+
+Search is **BM25 inside pocketd**, not embeddings. That buys a lot: no embedding
+model on the drive, no second `llama-server` instance, no extra RAM, nothing new
+in `drive.lock` — and for your own notes the words you search with are usually the
+words you wrote. What it cannot do is match on meaning: ask about "cars" and a
+document that only ever says "automobile" will not come back. That is the upgrade
+path, not a defect.
+
+**There is no index file.** The index is rebuilt in memory from `docs/` at startup
+and after every change. A few megabytes rebuild in well under a second, and in
+exchange there is no index format to version, nothing half-written to detect, and
+nothing that can disagree with the documents themselves. Delete it and it returns.
+
+Some deliberate details:
+
+- **Chunks are paragraph-aligned**, ~1000 characters with 150 of overlap. A
+  fragment starting mid-sentence reads as noise both to the model and to the
+  person checking the citation, and the overlap keeps a fact that straddles a
+  boundary findable from either side.
+- **At most two passages per document**, so one long file cannot crowd out every
+  other source.
+- **The retrieved block is never stored.** It is prepended to a single request and
+  never enters the transcript, so it is not replayed on the next turn and does not
+  eat context forever. Only the document *names* are saved, as the citation line.
+- **Text only.** PDF and Word are refused with a message saying so rather than
+  indexed as line noise — a NUL byte or a run of control characters is enough to
+  tell. PDF support means a parser, which is the next real piece of work.
+- **Retrieval failing never blocks an answer.** If search errors, the question
+  goes to the model ungrounded.
 
 ## Layout
 
 ```
 repo (internal SSD — never develop on exFAT)
 ├── ui/                     zero-dependency chat UI (no CDN, works offline)
-├── helper/                 pocketd — front door, proxy, and chat storage (Go, stdlib only)
-├── runtime/                launchers + erase-chats.command, copied to the drive
+├── helper/                 pocketd — front door, proxy, storage, BM25 search (Go, stdlib only)
+├── runtime/                launchers + erase scripts, copied to the drive
 ├── docker/                 dev image + linux/windows cross-build images
 ├── scripts/
 │   ├── build-mac.sh        native Metal build
