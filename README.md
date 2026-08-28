@@ -1,4 +1,4 @@
-# LLM-flashDrive
+# flashDrive-LLM
 
 A portable LLM on a USB drive. Plug it into any Mac, Windows, or Linux machine —
 double-click one file — chat with a local model. **No install, no internet, no admin rights.**
