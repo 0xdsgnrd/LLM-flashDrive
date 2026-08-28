@@ -39,6 +39,25 @@ cp -f "$ROOT/runtime/run-windows.bat" "$ROOT/runtime/run-windows.ps1" "$DRIVE/"
 chmod +x "$DRIVE/run-mac.command" "$DRIVE/run-linux.sh" 2>/dev/null || true
 echo "  ✓ launchers"
 
+# --- provenance --------------------------------------------------------
+# The drive must be self-describing. Without this, a stick holding seven .gguf
+# files says nothing about where they came from — identifying the Llama-70B
+# already on it once took byte-matching against three candidate repos. It also
+# lets verify-drive.sh run against a drive with no repo checked out, which is
+# the situation on any machine you carry the drive to.
+if [ -f "$ROOT/drive.lock" ]; then
+  {
+    cat "$ROOT/drive.lock"
+    echo
+    echo "# ---- staged by release.sh ----"
+    echo "# repo commit  $(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)$(git -C "$ROOT" diff --quiet 2>/dev/null || echo ' (dirty)')"
+    echo "# staged from  $(hostname -s 2>/dev/null || echo unknown)"
+  } > "$DRIVE/drive.lock"
+  echo "  ✓ drive.lock ($(grep -c '^model' "$ROOT/drive.lock") models pinned)"
+else
+  echo "  · drive.lock  (absent — drive will not record its own provenance)"
+fi
+
 # --- hygiene -----------------------------------------------------------
 xattr -dr com.apple.quarantine "$DRIVE" 2>/dev/null || true   # unblock Gatekeeper elsewhere
 touch "$DRIVE/.metadata_never_index"
