@@ -1,4 +1,4 @@
-// Portable LLM UI — zero dependencies, same-origin against llama-server.
+// Pocket LLM UI — zero dependencies, same-origin against llama-server.
 // llama-server serves this directory via --path, so /v1/* is same-origin: no CORS.
 
 const $ = (id) => document.getElementById(id);

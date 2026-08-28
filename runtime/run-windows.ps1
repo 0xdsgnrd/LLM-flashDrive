@@ -1,4 +1,4 @@
-# Portable LLM launcher - Windows (x86_64, CPU build), router mode.
+# Pocket LLM launcher - Windows (x86_64, CPU build), router mode.
 $ErrorActionPreference = 'Stop'
 $Dir    = $PSScriptRoot
 $Bin    = Join-Path $Dir 'bin\win-x64\llama-server.exe'
@@ -7,7 +7,7 @@ $Ui     = Join-Path $Dir 'ui'
 $Ctx    = 8192
 
 Clear-Host
-Write-Host "  Portable LLM"
+Write-Host "  Pocket LLM"
 Write-Host "  ----------------------------------------"
 
 if (-not (Test-Path $Bin)) {

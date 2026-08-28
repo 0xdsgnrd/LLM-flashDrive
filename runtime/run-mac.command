@@ -1,5 +1,5 @@
 #!/bin/bash
-# Portable LLM launcher — macOS (Apple Silicon), router mode.
+# Pocket LLM launcher — macOS (Apple Silicon), router mode.
 # Serves EVERY model in models/ and lets the UI pick per request.
 set -uo pipefail
 
@@ -11,7 +11,7 @@ CTX=8192
 
 cd "$DIR"
 clear
-echo "  Portable LLM"
+echo "  Pocket LLM"
 echo "  ─────────────────────────────────────────"
 
 [ -x "$BIN" ] || { echo "  ✗ Missing binary: $BIN"; echo; read -r -p "  Press Return to close."; exit 1; }

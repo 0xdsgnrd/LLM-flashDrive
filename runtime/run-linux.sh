@@ -1,5 +1,5 @@
 #!/bin/bash
-# Portable LLM launcher — Linux (x86_64, CPU build), router mode.
+# Pocket LLM launcher — Linux (x86_64, CPU build), router mode.
 set -uo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -7,7 +7,7 @@ BIN="$DIR/bin/linux-x64/llama-server"
 MODELS="$DIR/models"; UI="$DIR/ui"; CTX=8192
 
 cd "$DIR"; clear
-echo "  Portable LLM"
+echo "  Pocket LLM"
 echo "  ─────────────────────────────────────────"
 
 if [ ! -x "$BIN" ]; then
