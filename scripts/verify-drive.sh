@@ -16,7 +16,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -n "${DRIVE:-}" ]; then :
 elif [ -d "$SELF_DIR/models" ] && [ -f "$SELF_DIR/drive.lock" ]; then DRIVE="$SELF_DIR"
-else DRIVE="/Volumes/ai-Drive"; fi
+else DRIVE="/Volumes/Pocket-Ai"; fi
 # Prefer the repo's lock, but fall back to the one release.sh stages on the
 # drive — on a machine with no checkout, that copy is the only lock there is.
 if [ -n "${LOCK:-}" ];            then :
