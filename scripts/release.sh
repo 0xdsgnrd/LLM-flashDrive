@@ -3,7 +3,7 @@
 # downloaded straight to the drive by fetch-model.sh and never round-trip.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DRIVE="${DRIVE:-/Volumes/Pocket-Ai}"
+DRIVE="${DRIVE:-/Volumes/Pocket-LLM}"
 
 [ -d "$DRIVE" ] || { echo "✗ Drive not mounted at $DRIVE"; exit 1; }
 [ -w "$DRIVE" ] || { echo "✗ $DRIVE is not writable"; exit 1; }

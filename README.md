@@ -17,7 +17,7 @@ YOUR MACHINE (build time)              THEIR MACHINE (run time)
 ──────────────────────────             ────────────────────────
 Docker  → compiles linux/win binaries  nothing installed
 Node    → dev server + UI                       │
-        └──────► /Volumes/Pocket-Ai ────────────┘
+        └──────► /Volumes/Pocket-LLM ───────────┘
                  native binaries · .gguf · static HTML
 ```
 
@@ -59,7 +59,7 @@ repo (internal SSD — never develop on exFAT)
 │   ├── build-windows.sh    mingw-w64 cross-compile, fully static
 │   ├── fetch-model.sh      pull GGUFs straight to the drive
 │   ├── devserver.mjs       static server + API proxy
-│   └── release.sh          stage everything → /Volumes/Pocket-Ai
+│   └── release.sh          stage everything → /Volumes/Pocket-LLM
 └── dist/                   build outputs (gitignored)
 ```
 

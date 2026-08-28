@@ -10,7 +10,7 @@
 # from the HF API, never hardcoded, so this does not rot when repos re-tag.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DRIVE="${DRIVE:-/Volumes/Pocket-Ai}"
+DRIVE="${DRIVE:-/Volumes/Pocket-LLM}"
 LOCK="${LOCK:-$ROOT/drive.lock}"
 REPO="${1:?usage: fetch-model.sh <hf-repo> [filename]}"
 FILE="${2:-}"
