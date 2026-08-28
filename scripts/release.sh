@@ -8,6 +8,15 @@ DRIVE="${DRIVE:-/Volumes/Pocket-LLM}"
 [ -d "$DRIVE" ] || { echo "✗ Drive not mounted at $DRIVE"; exit 1; }
 [ -w "$DRIVE" ] || { echo "✗ $DRIVE is not writable"; exit 1; }
 
+# Refuse to stage over a running app. Replacing a binary that a live process has
+# mapped is what produced a staged pocketd that was byte-identical to dist/,
+# passed `codesign -v`, and still died instantly with SIGKILL.
+if pgrep -f "$DRIVE/bin/" >/dev/null 2>&1; then
+  echo "✗ Pocket LLM is still running from $DRIVE."
+  echo "  Close its window (or: pkill -f '$DRIVE/bin/') and run this again."
+  exit 1
+fi
+
 echo "Staging → $DRIVE"
 mkdir -p "$DRIVE"/{bin/{mac-arm64,linux-x64,win-x64},models,ui,logs,chats,docs}
 
@@ -16,7 +25,16 @@ staged=0
 for plat in mac-arm64 linux-x64 win-x64; do
   src="$ROOT/dist/$plat"
   if compgen -G "$src/*" >/dev/null 2>&1; then
-    cp -f "$src"/* "$DRIVE/bin/$plat/"
+    # Remove before copying, rather than `cp -f` over the top. Overwriting a
+    # Mach-O in place leaves the volume's cached pages for that inode
+    # inconsistent with the code signature the kernel then checks, and macOS
+    # answers that with SIGKILL at exec — from a file whose bytes and signature
+    # are both perfectly valid on disk. A fresh file gets a fresh inode.
+    for f in "$src"/*; do
+      dst="$DRIVE/bin/$plat/$(basename "$f")"
+      rm -f "$dst"
+      cp "$f" "$dst"
+    done
     echo "  ✓ bin/$plat"
     staged=$((staged+1))
   else
