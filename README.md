@@ -3,20 +3,26 @@
 A portable LLM on a USB drive. Plug it into any Mac, Windows, or Linux machine —
 double-click one file — chat with a local model. **No install, no internet, no admin rights.**
 
-## The one rule
+## Docker is the compiler, not the runtime
 
-**Docker builds it. Docker never ships on it.**
+Linux and Windows binaries can't be built on a Mac, and the Linux one has to link
+against a deliberately *old* glibc (bullseye, 2.31) so it still runs on distros from
+2020 onward. Containers solve both — pinned toolchains, repeatable results, nothing
+extra installed on your machine.
+
+None of it reaches the drive.
 
 ```
 YOUR MACHINE (build time)              THEIR MACHINE (run time)
 ──────────────────────────             ────────────────────────
 Docker  → compiles linux/win binaries  nothing installed
 Node    → dev server + UI                       │
-        └──────► /Volumes/ai-Drive ─────────────┘
+        └──────► /Volumes/LLM-flashDrive ───────┘
                  native binaries · .gguf · static HTML
 ```
 
-A compiled binary carries no trace of its build environment. The end user needs nothing.
+A compiled binary carries no trace of its build environment, so the machine you plug
+into needs nothing at all.
 
 ## The GPU wall
 
