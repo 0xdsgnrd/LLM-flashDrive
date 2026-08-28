@@ -6,7 +6,7 @@
 # 2,368 bytes of Llama-3.3-70B. sha256 is the only reliable identity.
 #
 #   add an entry     ./scripts/lock-add.sh <hf-repo> <filename>
-#   check the drive  ./scripts/verify-drive.sh          (not written yet)
+#   check the drive  ./scripts/verify-drive.sh          (sizes; --sha for content)
 #
 # Fields are whitespace-separated; '#' starts a comment.
 
