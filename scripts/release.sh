@@ -9,7 +9,7 @@ DRIVE="${DRIVE:-/Volumes/Pocket-LLM}"
 [ -w "$DRIVE" ] || { echo "✗ $DRIVE is not writable"; exit 1; }
 
 echo "Staging → $DRIVE"
-mkdir -p "$DRIVE"/{bin/{mac-arm64,linux-x64,win-x64},models,ui,logs}
+mkdir -p "$DRIVE"/{bin/{mac-arm64,linux-x64,win-x64},models,ui,logs,chats}
 
 # --- binaries (only those that have been built) ------------------------
 staged=0
@@ -36,7 +36,8 @@ echo "  ✓ ui/"
 # --- launchers (line endings matter: LF for unix, CRLF for windows) -----
 cp -f "$ROOT/runtime/run-mac.command" "$ROOT/runtime/run-linux.sh" "$DRIVE/"
 cp -f "$ROOT/runtime/run-windows.bat" "$ROOT/runtime/run-windows.ps1" "$DRIVE/"
-chmod +x "$DRIVE/run-mac.command" "$DRIVE/run-linux.sh" 2>/dev/null || true
+cp -f "$ROOT/runtime/erase-chats.command" "$DRIVE/"
+chmod +x "$DRIVE/run-mac.command" "$DRIVE/run-linux.sh" "$DRIVE/erase-chats.command" 2>/dev/null || true
 echo "  ✓ launchers"
 
 # --- provenance --------------------------------------------------------
@@ -63,6 +64,14 @@ if [ -f "$ROOT/drive.lock" ]; then
   fi
 else
   echo "  · drive.lock  (absent — drive will not record its own provenance)"
+fi
+
+# --- conversations -----------------------------------------------------
+# chats/ is created above and then left completely alone. It is the user's data,
+# written only by pocketd on the drive; a release must never stage over it and
+# never quietly erase it. Use the app's erase button or erase-chats.command.
+if compgen -G "$DRIVE/chats/*.jsonl" >/dev/null 2>&1; then
+  echo "  · chats/ ($(ls "$DRIVE"/chats/*.jsonl | wc -l | tr -d ' ') conversation(s) — untouched)"
 fi
 
 # --- hygiene -----------------------------------------------------------

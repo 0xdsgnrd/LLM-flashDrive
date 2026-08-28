@@ -65,29 +65,66 @@ try {
     Write-Host "  (note: manifest not writable - UI will offer all models)"
 }
 
-$Port = 8080
-while (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue) { $Port++ }
+# pocketd takes the public port and llama-server moves to a private one behind
+# it, so the browser still sees a single origin and pocketd can own /api/* to
+# write chats to the drive. Without the helper, llama-server serves the UI as
+# it always did and history is off.
+function Get-FreePort([int]$Start) {
+    $p = $Start
+    while (Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue) { $p++ }
+    return $p
+}
+
+$Port      = Get-FreePort 8080
+$Helper    = Join-Path $Dir 'bin\win-x64\pocketd.exe'
+$Chats     = Join-Path $Dir 'chats'
+$HasHelper = Test-Path $Helper
+
+if ($HasHelper) {
+    $LlamaPort = Get-FreePort ($Port + 1)
+    $Hist = "on - saved to chats\ on the drive"
+} else {
+    $LlamaPort = $Port
+    $Hist = "OFF - helper missing, nothing will be saved"
+}
 
 $Cores = (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors
 Write-Host "  Machine : ${RamGb}GB RAM - CPU inference"
 Write-Host "  Models  : $Fitting of $($Files.Count) usable, up to $MaxN loaded at once"
+Write-Host "  History : $Hist"
 Write-Host "  Address : http://127.0.0.1:$Port"
 Write-Host "  ----------------------------------------"
 Write-Host "  Pick a model in the sidebar. Close this window to shut down."
 Write-Host ""
 
+$llamaArgs = @('--models-dir', $Models, '--host','127.0.0.1', '--port', $LlamaPort,
+               '-c', $Ctx, '-t', $Cores, '--models-max', $MaxN,
+               '--cors-origins','localhost','--no-warmup')
+if (-not $HasHelper) { $llamaArgs += @('--path', $Ui) }
+
 $logPath = Join-Path $Dir 'logs\server.log'
 $proc = Start-Process -FilePath $Bin -PassThru -NoNewWindow -RedirectStandardOutput $logPath `
-    -RedirectStandardError (Join-Path $Dir 'logs\server.err.log') `
-    -ArgumentList @('--models-dir', $Models, '--host','127.0.0.1', '--port', $Port,
-                    '--path', $Ui, '-c', $Ctx, '-t', $Cores,
-                    '--models-max', $MaxN, '--cors-origins','localhost','--no-warmup')
+    -RedirectStandardError (Join-Path $Dir 'logs\server.err.log') -ArgumentList $llamaArgs
+
+$helperProc = $null
+if ($HasHelper) {
+    $helperProc = Start-Process -FilePath $Helper -PassThru -NoNewWindow `
+        -RedirectStandardOutput (Join-Path $Dir 'logs\pocketd.log') `
+        -RedirectStandardError  (Join-Path $Dir 'logs\pocketd.err.log') `
+        -ArgumentList @('-port', $Port, '-ui', $Ui, '-chats', $Chats,
+                        '-upstream', "127.0.0.1:$LlamaPort")
+}
 
 try {
     foreach ($i in 1..600) {
         if ($proc.HasExited) {
             Write-Host "  x Server exited." -ForegroundColor Red
             Get-Content $logPath -Tail 15 -ErrorAction SilentlyContinue
+            Read-Host "  Press Enter to close"; exit 1
+        }
+        if ($helperProc -and $helperProc.HasExited) {
+            Write-Host "  x Helper exited." -ForegroundColor Red
+            Get-Content (Join-Path $Dir 'logs\pocketd.err.log') -Tail 15 -ErrorAction SilentlyContinue
             Read-Host "  Press Enter to close"; exit 1
         }
         try {
@@ -100,4 +137,5 @@ try {
     $proc.WaitForExit()
 } finally {
     if (-not $proc.HasExited) { $proc.Kill() }
+    if ($helperProc -and -not $helperProc.HasExited) { $helperProc.Kill() }
 }

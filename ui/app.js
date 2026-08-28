@@ -1,11 +1,13 @@
-// Pocket LLM UI — zero dependencies, same-origin against llama-server.
-// llama-server serves this directory via --path, so /v1/* is same-origin: no CORS.
+// Pocket LLM UI — zero dependencies, one origin, no CORS.
+// pocketd serves this directory, forwards /v1/* to llama-server, and owns
+// /api/* — so conversations are written to the drive and never to this browser.
 
 const $ = (id) => document.getElementById(id);
 const msgs = $('messages');
 let history = [];
 let controller = null;
 let currentModel = null;      // null => let the server choose
+let savedModel = null;        // preference read back from the drive, not localStorage
 
 /* ---------- rendering ---------- */
 
@@ -149,7 +151,7 @@ async function populateModels(ids) {
   // be run individually, so offering them as separate entries would hand the
   // user broken choices. The launcher applies the same filter to its size math.
   const SPLIT_PART = /-\d{5}-of-\d{5}$/;
-  const saved = (() => { try { return localStorage.getItem('portable-llm-model'); } catch { return null; } })();
+  const saved = savedModel;
 
   sel.innerHTML = '';
   let firstUsable = null;
@@ -211,7 +213,10 @@ async function populateModels(ids) {
 async function send(text) {
   addMessage('user', text);
   history.push({ role: 'user', content: text });
-  save();
+  const isFirstTurn = history.length === 1;
+  await ensureChat();
+  await record('user', text);
+  if (isFirstTurn) refreshChats();      // the list is titled from this message
 
   const body = addMessage('assistant', '');
   body.innerHTML = '<span class="cursor"></span>';
@@ -270,7 +275,8 @@ async function send(text) {
     // Reasoning is deliberately NOT pushed to history — models are trained to
     // see only prior answers, and replaying it wastes context every turn.
     history.push({ role: 'assistant', content: acc });
-    save();
+    await record('assistant', acc);
+    refreshChats();
   } catch (err) {
     if (err.name !== 'AbortError') {
       acc += (acc ? '\n\n' : '') + `⚠️ ${err.message}. Is the model still loading?`;
@@ -284,18 +290,108 @@ async function send(text) {
   }
 }
 
-/* ---------- persistence (per-viewer convenience only) ---------- */
+/* ---------- conversations (kept on the drive, never in this browser) ---------- */
 
-function save() {
-  try { localStorage.setItem('portable-llm-chat', JSON.stringify(history)); } catch {}
+// pocketd is the only writer. If it did not start — a locked-down machine, a
+// read-only drive — llama-server serves the UI alone and there is no /api at
+// all. History then stays off and says so. It must NOT quietly fall back to
+// localStorage: leaving conversations on a borrowed laptop is the one thing
+// this drive is not allowed to do.
+let historyOn = false;
+let chatId = null;            // null => nothing written for this conversation yet
+
+async function api(path, opts = {}) {
+  const r = await fetch('/api' + path, {
+    headers: { 'Content-Type': 'application/json' }, ...opts,
+  });
+  if (!r.ok) throw new Error(`${path} → ${r.status}`);
+  return r.json();
 }
-function restore() {
+
+async function initHistory() {
   try {
-    const saved = JSON.parse(localStorage.getItem('portable-llm-chat') || '[]');
-    if (!Array.isArray(saved) || !saved.length) return;
-    history = saved;
-    saved.forEach((m) => addMessage(m.role, m.content));
+    historyOn = !!(await api('/health')).history;
+  } catch { historyOn = false; }
+
+  $('erase-all').hidden = !historyOn;
+  if (!historyOn) {
+    $('chats').innerHTML = '<div class="chats-off">History is off — this machine ' +
+      'can\u2019t save to the drive. Conversations will be lost when you close the window.</div>';
+    return;
+  }
+  try { savedModel = (await api('/settings')).model ?? null; } catch {}
+
+  // Pick up where the last session stopped, the way restoring from browser
+  // storage used to — only now it follows the drive, not the machine.
+  const list = await refreshChats();
+  if (list.length) await openChat(list[0].id);
+}
+
+async function refreshChats() {
+  if (!historyOn) return [];
+  let list;
+  try { list = await api('/chats'); } catch { return []; }
+
+  const box = $('chats');
+  box.innerHTML = '';
+  for (const c of list) {
+    const row = document.createElement('div');
+    row.className = 'chat-row' + (c.id === chatId ? ' active' : '');
+    row.innerHTML =
+      `<button class="chat-open" title="${esc(c.title)}">${esc(c.title)}</button>` +
+      `<button class="chat-del" title="Delete this conversation">×</button>`;
+    row.querySelector('.chat-open').onclick = () => openChat(c.id);
+    row.querySelector('.chat-del').onclick = async () => {
+      try { await api('/chats/' + c.id, { method: 'DELETE' }); } catch {}
+      if (c.id === chatId) newChat(); else refreshChats();
+    };
+    box.appendChild(row);
+  }
+  return list;
+}
+
+async function openChat(id) {
+  controller?.abort();
+  let c;
+  try { c = await api('/chats/' + id); } catch { return; }
+  chatId = c.id;
+  history = c.messages.map(({ role, content }) => ({ role, content }));
+  msgs.innerHTML = '';
+  if (history.length) history.forEach((m) => addMessage(m.role, m.content));
+  else emptyState();
+  refreshChats();
+}
+
+// The file is created by the first message, not by the New chat click —
+// otherwise idle clicking litters the drive with empty transcripts.
+async function ensureChat() {
+  if (!historyOn || chatId) return;
+  try {
+    chatId = (await api('/chats', {
+      method: 'POST', body: JSON.stringify({ model: currentModel }),
+    })).id;
+  } catch { historyOn = false; }
+}
+
+async function record(role, content) {
+  if (!historyOn || !chatId) return;
+  try {
+    await api('/chats/' + chatId, { method: 'POST', body: JSON.stringify({ role, content }) });
   } catch {}
+}
+
+function emptyState() {
+  msgs.innerHTML = '<div class="empty"><h1>Local model, ready.</h1>' +
+    '<p>Everything below runs from the drive. Nothing leaves this computer.</p></div>';
+}
+
+function newChat() {
+  controller?.abort();
+  history = [];
+  chatId = null;
+  emptyState();
+  $('tps').textContent = '—';
+  refreshChats();
 }
 
 /* ---------- wiring ---------- */
@@ -319,20 +415,39 @@ $('composer').addEventListener('submit', (e) => {
 $('stop').addEventListener('click', () => controller?.abort());
 $('model-select').addEventListener('change', (e) => {
   currentModel = e.target.value;
-  try { localStorage.setItem('portable-llm-model', currentModel); } catch {}
+  savedModel = currentModel;
+  if (historyOn) {
+    api('/settings', { method: 'PUT', body: JSON.stringify({ model: currentModel }) })
+      .catch(() => {});
+  }
   // Chat templates and tokenizers differ per model; replaying one model's
   // transcript into another produces confused output. Start clean.
-  $('new-chat').click();
+  newChat();
 });
-$('new-chat').addEventListener('click', () => {
-  controller?.abort();
-  history = [];
-  save();
-  msgs.innerHTML = '<div class="empty"><h1>Local model, ready.</h1>' +
-    '<p>Everything below runs from the drive. Nothing leaves this computer.</p></div>';
-  $('tps').textContent = '—';
+$('new-chat').addEventListener('click', newChat);
+
+// Two-step rather than a confirm() dialog: a modal blocks the page, and this
+// button destroys everything on the drive. Disarms itself if left alone.
+let eraseArmed = null;
+$('erase-all').addEventListener('click', async () => {
+  const b = $('erase-all');
+  const reset = () => {
+    clearTimeout(eraseArmed); eraseArmed = null;
+    b.classList.remove('armed'); b.textContent = 'Erase all conversations';
+  };
+  if (!eraseArmed) {
+    b.classList.add('armed');
+    b.textContent = 'Click again to erase everything';
+    eraseArmed = setTimeout(reset, 4000);
+    return;
+  }
+  reset();
+  try { await api('/chats', { method: 'DELETE' }); } catch {}
+  newChat();
 });
 
-restore();
-probe();
-setInterval(probe, 5000);
+(async () => {
+  await initHistory();
+  await probe();
+  setInterval(probe, 5000);
+})();

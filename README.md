@@ -42,23 +42,68 @@ The dev container proxies to the host's native server via `host.docker.internal`
 
 ## No CORS, by design
 
-`llama-server --path ui/` serves the UI **and** the `/v1/*` API from one origin.
-Nothing to configure, nothing to whitelist. `scripts/devserver.mjs` mirrors this in
-development by proxying, so dev and production behave identically.
+The browser talks to exactly one origin, so there is nothing to configure and
+nothing to whitelist. Which process is behind that origin depends on whether the
+helper is present:
+
+```
+with pocketd            browser → pocketd :8080 ─┬─ ui/            (static)
+                                                 ├─ /api/*         (conversations)
+                                                 └─ /v1/*  ──► llama-server :8081
+
+without it              browser → llama-server :8080 ── ui/ + /v1/*   (history off)
+```
+
+`scripts/devserver.mjs` has always done the proxying half of this in development;
+pocketd is that file, compiled and portable.
+
+## Conversations stay on the drive
+
+Chat history used to live in the browser's `localStorage`, which meant it stayed
+behind on every machine the drive was plugged into and never travelled with the
+stick. Both halves of that are wrong for a device whose whole promise is "no
+install, no trace."
+
+So `pocketd` owns storage. One conversation is one append-only `.jsonl` file in
+`chats/` on the drive: a header line, then one line per message.
+
+**Append-only is not a style choice.** exFAT has no journal and this drive gets
+unplugged by people, not by software. Rewriting a whole transcript each turn puts
+the entire conversation at risk on every message; appending one line risks only
+that line, and a torn final line — no trailing newline — is detected and dropped
+on read.
+
+The UI writes nothing to the browser at all, not even the model preference, which
+lives in `chats/settings.json` instead. **If pocketd cannot start** — a locked
+laptop, a read-only drive — llama-server serves the UI alone, there is no `/api`,
+and the sidebar says history is off. It does *not* quietly fall back to browser
+storage, because that is precisely the behaviour being removed.
+
+```bash
+./erase-chats.command      # on the drive: erase every conversation
+```
+
+The app's sidebar has the same button, and `verify-drive.sh` reports how many
+conversations are on the drive so you know before handing it to someone. This is
+a plain delete: exFAT does not overwrite the bytes, so it defends against the next
+person to plug the drive in, not against someone with recovery tools.
 
 ## Layout
 
 ```
 repo (internal SSD — never develop on exFAT)
 ├── ui/                     zero-dependency chat UI (no CDN, works offline)
-├── runtime/                launchers copied to the drive
+├── helper/                 pocketd — front door, proxy, and chat storage (Go, stdlib only)
+├── runtime/                launchers + erase-chats.command, copied to the drive
 ├── docker/                 dev image + linux/windows cross-build images
 ├── scripts/
 │   ├── build-mac.sh        native Metal build
 │   ├── build-linux.sh      static, old glibc, GGML_NATIVE=OFF
 │   ├── build-windows.sh    mingw-w64 cross-compile, fully static
+│   ├── build-helper.sh     pocketd for all three platforms (no Go install needed)
 │   ├── fetch-model.sh      pull GGUFs straight to the drive
 │   ├── devserver.mjs       static server + API proxy
+│   ├── verify-drive.sh     check the drive against drive.lock
 │   └── release.sh          stage everything → /Volumes/Pocket-LLM
 └── dist/                   build outputs (gitignored)
 ```
@@ -70,6 +115,8 @@ repo (internal SSD — never develop on exFAT)
 brew install cmake && ./scripts/build-mac.sh
 ./scripts/build-linux.sh
 ./scripts/build-windows.sh
+./scripts/build-helper.sh       # pocketd; needs Docker, not Go
+
 
 # 2. get a model (lists available files if you omit the filename)
 ./scripts/fetch-model.sh <hf-repo>
@@ -128,6 +175,11 @@ A drive holding only a 70B is useless on the 16GB laptops most people own.
   `std::condition_variable`. Build fails with 131 "does not name a type" errors.
 - **Fully static Windows build** — no mingw runtime DLLs required on the target.
 - **Ad-hoc codesign on arm64** — required by macOS; survives the copy to exFAT.
+  Applies to `pocketd` too, not just `llama-server`.
+- **`pocketd` sidesteps all of the C++ traps above.** `CGO_ENABLED=0` produces a
+  binary with no libc dependency at all, so there is no glibc version to match, no
+  `libgomp`, and no mingw threading model to get wrong. It is the cheap half of
+  the build.
 - **CRLF for `.bat`/`.ps1`, LF for `.sh`/`.command`** — enforced in `runtime/`.
 - **Quarantine stripped** at release, so Gatekeeper doesn't block on other Macs.
 - **`-ExecutionPolicy Bypass`** so the PowerShell launcher runs without admin.

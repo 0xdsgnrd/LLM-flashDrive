@@ -96,6 +96,30 @@ for p in mac-arm64 linux-x64 win-x64; do
   else printf '  ·  bin/%-42s missing\n' "$p"; fi
 done
 
+# pocketd is what writes conversations to the drive. Missing it is not a
+# corruption, but it silently downgrades that platform to no history at all,
+# which is worth saying out loud rather than discovering mid-session.
+for p in mac-arm64 linux-x64 win-x64; do
+  h="$DRIVE/bin/$p/pocketd"; [ "$p" = win-x64 ] && h="$h.exe"
+  if [ -f "$h" ]; then
+    printf '  ✓  bin/%s/pocketd%*s%s\n' "$p" $((30 - ${#p})) "" \
+      "$(fsize "$h" | awk '{printf "%.0fMB", $1/1048576}')"
+  else
+    printf '  ·  bin/%s/pocketd%*s%s\n' "$p" $((30 - ${#p})) "" "missing — history OFF there"
+  fi
+done
+
+# Anyone about to lend this drive needs to know whether their conversations are
+# still on it. Titles are never printed — the count is the whole point.
+NCHAT=0
+for f in "$DRIVE"/chats/*.jsonl; do [ -e "$f" ] && NCHAT=$((NCHAT+1)); done
+echo
+if [ "$NCHAT" -gt 0 ]; then
+  printf '  !  chats/  %s saved conversation(s) — erase before handing the drive on\n' "$NCHAT"
+else
+  printf '  ✓  chats/  empty\n'
+fi
+
 # The host's own binary can be run, so check it was built from the pinned
 # commit. The cross-compiled ones cannot be executed here.
 WANT_COMMIT=$(awk '$1=="llama_commit"{print $2}' "$LOCK")

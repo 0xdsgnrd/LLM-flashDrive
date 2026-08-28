@@ -72,27 +72,59 @@ done < <(for f in "${FILES[@]}"; do stat -c%s "$f"; done | sort -nr)
   printf '}}\n'
 } > "$UI/machine.json" 2>/dev/null || echo "  (note: manifest not writable — UI will offer all models)"
 
-PORT=8080
-while ss -ltn 2>/dev/null | grep -q ":$PORT " ; do PORT=$((PORT+1)); done
+# ---- ports --------------------------------------------------------------
+# pocketd takes the public port and llama-server moves to a private one behind
+# it. The browser still sees a single origin, so there is still nothing to
+# configure for CORS, and pocketd can own /api/* to write chats to the drive.
+# Without the helper, llama-server serves the UI itself exactly as before.
+free_port() { local p=$1; while ss -ltn 2>/dev/null | grep -q ":$p " ; do p=$((p+1)); done; echo "$p"; }
+
+PORT=$(free_port 8080)
+HELPER="$DIR/bin/linux-x64/pocketd"
+CHATS="$DIR/chats"
+
+if [ -x "$HELPER" ]; then
+  LLAMA_PORT=$(free_port $((PORT + 1)))
+  HIST="on — saved to chats/ on the drive"
+else
+  LLAMA_PORT="$PORT"
+  HIST="OFF — helper missing, nothing will be saved"
+fi
 
 echo "  Machine : ${RAM_GB}GB RAM · CPU inference"
 echo "  Models  : ${FITTING} of ${#FILES[@]} usable, up to ${MAXN} loaded at once"
+echo "  History : $HIST"
 echo "  Address : http://127.0.0.1:$PORT"
-echo "  ─────────────────────────────────────────"; echo
+echo "  ─────────────────────────────────────────"
+echo "  Pick a model in the sidebar. Close this window to shut down."
+echo
 
-"$BIN" --models-dir "$MODELS" --host 127.0.0.1 --port "$PORT" --path "$UI" \
-       -c "$CTX" -t "$(nproc)" --models-max "$MAXN" \
-       --cors-origins localhost --no-warmup > "$DIR/logs/server.log" 2>&1 &
+ARGS=(--models-dir "$MODELS" --host 127.0.0.1 --port "$LLAMA_PORT"
+      -c "$CTX" -t "$(nproc)" --models-max "$MAXN" --cors-origins localhost --no-warmup)
+[ -x "$HELPER" ] || ARGS+=(--path "$UI")      # only serve the UI when pocketd cannot
+
+"$BIN" "${ARGS[@]}" > "$DIR/logs/server.log" 2>&1 &
 PID=$!
-trap 'kill $PID 2>/dev/null; wait $PID 2>/dev/null' EXIT INT TERM
+HPID=""
+if [ -x "$HELPER" ]; then
+  "$HELPER" -port "$PORT" -ui "$UI" -chats "$CHATS" -upstream "127.0.0.1:$LLAMA_PORT" \
+      > "$DIR/logs/pocketd.log" 2>&1 &
+  HPID=$!
+fi
+trap 'kill $PID $HPID 2>/dev/null; wait $PID $HPID 2>/dev/null' EXIT INT TERM
 
 for _ in $(seq 1 600); do
   if curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
     echo "  ✓ Ready — opening browser."
-    (xdg-open "http://127.0.0.1:$PORT" >/dev/null 2>&1 &) ; break
+    (xdg-open "http://127.0.0.1:$PORT" >/dev/null 2>&1 &)
+    break
   fi
-  kill -0 $PID 2>/dev/null || { echo "  ✗ Server exited:"; tail -15 "$DIR/logs/server.log"
+  kill -0 $PID 2>/dev/null || { echo "  ✗ Server exited. Last lines:"; tail -15 "$DIR/logs/server.log"
     echo; read -r -p "  Press Return to close."; exit 1; }
+  if [ -n "$HPID" ] && ! kill -0 $HPID 2>/dev/null; then
+    echo "  ✗ Helper exited. Last lines:"; tail -15 "$DIR/logs/pocketd.log"
+    echo; read -r -p "  Press Return to close."; exit 1
+  fi
   sleep 1
 done
 wait $PID
