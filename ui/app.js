@@ -107,6 +107,36 @@ async function loadManifest() {
 const prettyBytes = (b) =>
   b >= 1 << 30 ? (b / (1 << 30)).toFixed(1) + 'GB' : Math.round(b / (1 << 20)) + 'MB';
 
+// A filename carries packaging detail — quantisation, tuning suffix, datestamp —
+// that is IDENTICAL across every file on this drive and so distinguishes nothing,
+// while eating most of a narrow sidebar's width. Strip it for display only;
+// opt.value keeps the exact id the server expects, and opt.title keeps the
+// on-disk name one hover away.
+const displayName = (id) => id
+  .replace(/[-_](UD[-_])?I?Q\d+(_[A-Z0-9]+)*$/i, '')   // -Q4_K_M, -UD-Q4_K_XL, -IQ4_XS
+  .replace(/[-_](Instruct|it|qat|chat|hf)\b/gi, '')
+  .replace(/[-_]\d{4}$/, '')                           // -2507 and friends
+  .replace(/[-_]+/g, ' ')
+  .replace(/^./, (c) => c.toUpperCase());
+
+// Two facts worth surfacing because they change how a model behaves, not just
+// how fast it is. "A4B" is a naming convention, not a guess: it states the
+// active parameter count of a mixture-of-experts, which is why a 15.8GB file
+// runs like a far smaller one. R1 emits visible chain-of-thought.
+const tagFor = (id) =>
+  /[-_]A\d+B\b/i.test(id)        ? 'MoE'
+  : /(^|[-_])R1([-_]|$)/i.test(id) ? 'reasoning'
+  : '';
+
+// Bands are cut on size alone so a model nobody has ever described still lands
+// somewhere sensible. The header carries the tradeoff, which keeps each row
+// short enough to survive the sidebar.
+const BANDS = [
+  { label: 'Fast',         max:  8 * (1 << 30) },
+  { label: 'Balanced',     max: 25 * (1 << 30) },
+  { label: 'Best quality', max: Infinity },
+];
+
 async function populateModels(ids) {
   const sel = $('model-select');
   const signature = ids.join('|');
@@ -123,17 +153,46 @@ async function populateModels(ids) {
 
   sel.innerHTML = '';
   let firstUsable = null;
-  for (const id of ids) {
+
+  // Called in final display order, so firstUsable lands on the first model the
+  // user can actually see and pick.
+  const addOption = (parent, id) => {
     const meta = info[id];
     const isPart = SPLIT_PART.test(id);
     const fits = !isPart && (!meta || meta.fits !== false);   // unknown => assume usable
     const opt = document.createElement('option');
     opt.value = id;
-    opt.textContent = meta ? `${id}  (${prettyBytes(meta.bytes)})` : id;
+    opt.title = id;                                           // full on-disk name
+    const tag = isPart ? '' : tagFor(id);
+    opt.textContent = (isPart ? id : displayName(id))
+      + (meta ? `  ·  ${prettyBytes(meta.bytes)}` : '')
+      + (tag ? `  (${tag})` : '');
     if (isPart)      { opt.disabled = true; opt.textContent += '  — multi-part, unsupported'; }
     else if (!fits)  { opt.disabled = true; opt.textContent += '  — too large'; }
     else if (firstUsable === null) firstUsable = id;
-    sel.appendChild(opt);
+    parent.appendChild(opt);
+  };
+
+  // Banding needs a size, which only the manifest has. Without it, fall back to
+  // the flat list in server order rather than inventing groups (fail open, the
+  // same rule `fits` follows above).
+  const sized = ids.filter((id) => info[id] && !SPLIT_PART.test(id))
+                   .sort((a, b) => info[a].bytes - info[b].bytes);
+  const rest  = ids.filter((id) => !info[id] || SPLIT_PART.test(id));
+
+  if (sized.length === 0) {
+    for (const id of ids) addOption(sel, id);
+  } else {
+    const bandOf = (bytes) => BANDS.findIndex((b) => bytes < b.max);
+    BANDS.forEach((band, i) => {
+      const members = sized.filter((id) => bandOf(info[id].bytes) === i);
+      if (members.length === 0) return;                       // no empty headers
+      const group = document.createElement('optgroup');
+      group.label = band.label;
+      for (const id of members) addOption(group, id);
+      sel.appendChild(group);
+    });
+    for (const id of rest) addOption(sel, id);                 // unsized/parts last
   }
 
   const savedUsable = saved && ids.includes(saved) &&
