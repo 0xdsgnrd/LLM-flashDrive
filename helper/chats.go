@@ -260,6 +260,37 @@ func (s *Store) List() ([]Meta, error) {
 	return out, nil
 }
 
+// DropLast removes the final message from a transcript, which is what
+// "regenerate" needs: the answer being replaced has to stop existing, or a
+// reload would show both attempts stacked on top of each other.
+//
+// Truncating at the last newline is the whole operation — the append-only
+// format means the last line IS the last message, and everything before it is
+// untouched. The header line is never removed.
+func (s *Store) DropLast(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	p, err := s.path(id)
+	if err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		return err
+	}
+	end := len(raw)
+	if end > 0 && raw[end-1] == '\n' {
+		end-- // ignore the terminator of the line being dropped
+	}
+	cut := bytes.LastIndexByte(raw[:end], '\n')
+	header := bytes.IndexByte(raw, '\n')
+	if cut < 0 || header < 0 || cut < header {
+		return errors.New("no message to drop")
+	}
+	return os.WriteFile(p, raw[:cut+1], 0o644)
+}
+
 func (s *Store) Delete(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -77,6 +77,8 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.settings(w, r)
 	case path == "/chats":
 		a.chats(w, r)
+	case strings.HasSuffix(path, "/last") && strings.HasPrefix(path, "/chats/"):
+		a.chatLast(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/chats/"), "/last"))
 	case strings.HasPrefix(path, "/chats/"):
 		a.chat(w, r, strings.TrimPrefix(path, "/chats/"))
 	default:
@@ -317,4 +319,19 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, a.Index.Search(q, k))
+}
+
+// DELETE /api/chats/{id}/last — drop the final message. Used by regenerate,
+// which replaces an answer rather than appending a second one.
+func (a *API) chatLast(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodDelete {
+		w.Header().Set("Allow", "DELETE")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := a.Store.DropLast(id); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
