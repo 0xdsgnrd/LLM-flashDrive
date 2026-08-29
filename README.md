@@ -59,6 +59,34 @@ without it              browser → llama-server :8080 ── ui/ + /v1/*   (his
 `scripts/devserver.mjs` has always done the proxying half of this in development;
 pocketd is that file, compiled and portable.
 
+## The interface
+
+Still one HTML file, one stylesheet and one script — no framework, no build step,
+no webfonts, no CDN. It has to render from a stick on a machine with nothing
+installed and no network, so every icon is an inline SVG sprite and every colour
+is a CSS variable.
+
+What it does, in the order it matters:
+
+- **Markdown is actually parsed** — headings, nested lists, tables, quotes, rules,
+  links, emphasis. A local model answers in markdown whether or not the UI
+  understands it, so "minimal markdown" was not a smaller feature; it was tables
+  rendered as rows of pipes.
+- **Code blocks** carry the language and a copy button, with enough highlighting
+  to give code shape. Deliberately not a grammar for any language: one pass over
+  comments, strings, numbers and common keywords.
+- **Copy and regenerate** on a message. Regenerate truncates the answer from the
+  transcript rather than appending a second one, so a reload does not show both
+  attempts.
+- **Conversations grouped by age** — Today, Yesterday, Previous 7 days — with a
+  search box, because that is how people remember a conversation.
+- **The model picker** shows what each model costs and greys out what this
+  machine cannot run, still banded Fast / Balanced / Best quality.
+- **Light and dark** both first-class, following the system setting.
+
+Everything renders escaped: HTML in an answer, in a table cell, in a code fence
+or in a document title is shown as text, never as markup.
+
 ## Conversations stay on the drive
 
 Chat history used to live in the browser's `localStorage`, which meant it stayed
