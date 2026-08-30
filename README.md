@@ -80,8 +80,11 @@ What it does, in the order it matters:
   attempts.
 - **Conversations grouped by age** — Today, Yesterday, Previous 7 days — with a
   search box, because that is how people remember a conversation.
-- **The model picker** shows what each model costs and greys out what this
-  machine cannot run, still banded Fast / Balanced / Best quality.
+- **The model picker** bands models Fast / Balanced / Best quality, shows what
+  each one costs, and greys out what this machine cannot run. Sizes and fit come
+  from `machine.json`, which only the launcher writes — so the bands fall back to
+  the parameter count in the filename, and the picker stays grouped even when
+  pocketd is run on its own.
 - **Light and dark** both first-class. The system setting decides until the
   switch in the top bar is used; that choice is then stored on the drive with
   everything else, so a borrowed laptop still keeps nothing.

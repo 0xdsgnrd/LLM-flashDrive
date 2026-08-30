@@ -352,14 +352,38 @@ const tagFor = (id) =>
   : /(^|[-_])R1([-_]|$)/i.test(id) ? 'reasoning'
   : '';
 
-// Bands are cut on size alone so a model nobody has ever described still lands
+// Bands are cut on size, so a model nobody has ever described still lands
 // somewhere sensible. The header carries the tradeoff, which keeps each row
 // short enough to read at a glance.
 const BANDS = [
-  { label: 'Fast',         max:  8 * (1 << 30) },
-  { label: 'Balanced',     max: 25 * (1 << 30) },
-  { label: 'Best quality', max: Infinity },
+  { label: 'Fast',         maxBytes:  8 * (1 << 30), maxParams: 14 },
+  { label: 'Balanced',     maxBytes: 25 * (1 << 30), maxParams: 44 },
+  { label: 'Best quality', maxBytes: Infinity,       maxParams: Infinity },
 ];
+
+// machine.json only exists when the launcher wrote it, so running pocketd
+// directly used to collapse the picker into one flat, uncategorised list. Every
+// GGUF states its parameter count in its filename, which is enough to band it
+// without knowing the byte size. The parameter thresholds mirror the byte ones
+// at Q4 (~0.57GB per billion), so the grouping is the same either way.
+//
+// "26B-A4B" is a mixture-of-experts — 26 billion total, 4 active. The larger
+// number is the one that decides how heavy the file is.
+const paramsOf = (id) => {
+  const found = [...id.matchAll(/(\d+(?:\.\d+)?)\s*B\b/gi)].map((m) => parseFloat(m[1]));
+  return found.length ? Math.max(...found) : null;
+};
+
+const BYTES_PER_B = 0.57 * (1 << 30);   // Q4, measured across the models on this drive
+
+// Sizes when known, the estimate when not, so a mixed list still sorts sanely.
+const weightOf = (id, meta) => meta ? meta.bytes : (paramsOf(id) ?? 0) * BYTES_PER_B;
+
+const bandOf = (id, meta) => {
+  if (meta) return BANDS.findIndex((b) => meta.bytes < b.maxBytes);
+  const p = paramsOf(id);
+  return p === null ? -1 : BANDS.findIndex((b) => p < b.maxParams);
+};
 
 const SPLIT_PART = /-\d{5}-of-\d{5}$/;
 
@@ -395,19 +419,18 @@ async function populateModels(ids) {
     menu.appendChild(b);
   };
 
-  // Banding needs a size, which only the manifest has. Without it, fall back to
-  // a flat list in server order rather than inventing groups (fail open, the
-  // same rule `fits` follows above).
-  const sized = ids.filter((id) => info[id] && !SPLIT_PART.test(id))
-                   .sort((a, b) => info[a].bytes - info[b].bytes);
-  const rest  = ids.filter((id) => !info[id] || SPLIT_PART.test(id));
+  // Anything whose weight can be worked out — from the manifest or from its own
+  // name — gets a band. Only genuinely unreadable names fall through, and those
+  // go last rather than into an invented group.
+  const banded = ids.filter((id) => !SPLIT_PART.test(id) && bandOf(id, info[id]) >= 0)
+                    .sort((a, b) => weightOf(a, info[a]) - weightOf(b, info[b]));
+  const rest   = ids.filter((id) => SPLIT_PART.test(id) || bandOf(id, info[id]) < 0);
 
-  if (sized.length === 0) {
+  if (banded.length === 0) {
     ids.forEach(addItem);
   } else {
-    const bandOf = (bytes) => BANDS.findIndex((b) => bytes < b.max);
     BANDS.forEach((band, i) => {
-      const members = sized.filter((id) => bandOf(info[id].bytes) === i);
+      const members = banded.filter((id) => bandOf(id, info[id]) === i);
       if (!members.length) return;                            // no empty headers
       const label = document.createElement('div');
       label.className = 'menu-label';
@@ -415,7 +438,7 @@ async function populateModels(ids) {
       menu.appendChild(label);
       members.forEach(addItem);
     });
-    rest.forEach(addItem);                                    // unsized/parts last
+    rest.forEach(addItem);                                    // unreadable names last
   }
 
   const savedUsable = savedModel && ids.includes(savedModel) &&
