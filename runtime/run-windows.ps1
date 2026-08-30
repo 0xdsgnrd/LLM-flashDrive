@@ -3,8 +3,12 @@ $ErrorActionPreference = 'Stop'
 $Dir    = $PSScriptRoot
 $Bin    = Join-Path $Dir 'bin\win-x64\llama-server.exe'
 $Models = Join-Path $Dir 'models'
+$EmbedDir = Join-Path $Dir 'embed'
 $Ui     = Join-Path $Dir 'ui'
 $Ctx    = 8192
+# See run-mac.command: the encoder's own context, capped by llama-server down
+# to the model's training context anyway.
+$EmbedCtx = 2048
 
 Clear-Host
 Write-Host "  Pocket LLM"
@@ -16,8 +20,29 @@ if (-not (Test-Path $Bin)) {
 }
 
 $Ram    = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
+$Cores  = (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors
 $RamGb  = [math]::Round($Ram / 1GB)
 $Budget = [Math]::Min($Ram * 0.7, $Ram - 4GB)
+
+# The retrieval encoder, if the drive carries one. Kept out of models/ so it
+# never enters the router's enumeration, the model picker, or the --models-max
+# arithmetic below, where it would compete for the residency it must not lose.
+$EmbedFiles = @(Get-ChildItem -Path $EmbedDir -Filter *.gguf -ErrorAction SilentlyContinue | Sort-Object Name)
+$Embed = $null; $EmbedName = ''
+if ($EmbedFiles.Count -gt 0) {
+    $Embed = $EmbedFiles[0]
+    $EmbedName = [System.IO.Path]::GetFileNameWithoutExtension($Embed.Name)
+    if ($EmbedFiles.Count -gt 1) {
+        Write-Host "  ! $($EmbedFiles.Count) encoders in embed\ - using $EmbedName"
+    }
+    # Resident for the whole session, so it comes out of the same budget the
+    # chat models are packed against rather than being spent twice.
+    if (($Budget - $Embed.Length) -gt 0) { $Budget = $Budget - $Embed.Length }
+    else {
+        Write-Host "  ! Not enough RAM for the encoder as well - search will be lexical."
+        $Embed = $null; $EmbedName = ''
+    }
+}
 
 # See run-mac.command: multi-part models are one model across several files and
 # nothing groups them, so counting each part separately breaks the size math.
@@ -81,18 +106,25 @@ $Chats     = Join-Path $Dir 'chats'
 $Docs      = Join-Path $Dir 'docs'
 $HasHelper = Test-Path $Helper
 
+$EmbedPort = $null
 if ($HasHelper) {
     $LlamaPort = Get-FreePort ($Port + 1)
     $Hist = "on - saved to chats\ on the drive"
+    # Semantic search lives inside pocketd; without it there is no /api at all.
+    if ($Embed) { $EmbedPort = Get-FreePort ($LlamaPort + 1) }
 } else {
     $LlamaPort = $Port
     $Hist = "OFF - helper missing, nothing will be saved"
+    $Embed = $null; $EmbedName = ''
 }
 
-$Cores = (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors
+if ($EmbedPort) { $Search = "lexical + semantic ($EmbedName)" }
+else { $Search = "lexical (BM25) - add an encoder to embed\ for semantic search" }
+
 Write-Host "  Machine : ${RamGb}GB RAM - CPU inference"
 Write-Host "  Models  : $Fitting of $($Files.Count) usable, up to $MaxN loaded at once"
 Write-Host "  History : $Hist"
+Write-Host "  Search  : $Search"
 Write-Host "  Address : http://127.0.0.1:$Port"
 Write-Host "  ----------------------------------------"
 Write-Host "  Pick a model in the sidebar. Close this window to shut down."
@@ -107,13 +139,27 @@ $logPath = Join-Path $Dir 'logs\server.log'
 $proc = Start-Process -FilePath $Bin -PassThru -NoNewWindow -RedirectStandardOutput $logPath `
     -RedirectStandardError (Join-Path $Dir 'logs\server.err.log') -ArgumentList $llamaArgs
 
+# A dedicated server for the encoder rather than a second model in the router,
+# which on a small machine would evict the chat model on every search.
+$embedProc = $null
+if ($EmbedPort) {
+    $embedProc = Start-Process -FilePath $Bin -PassThru -NoNewWindow `
+        -RedirectStandardOutput (Join-Path $Dir 'logs\embed.log') `
+        -RedirectStandardError  (Join-Path $Dir 'logs\embed.err.log') `
+        -ArgumentList @('--embeddings', '-m', $Embed.FullName,
+                        '--host','127.0.0.1', '--port', $EmbedPort,
+                        '-c', $EmbedCtx, '-b', $EmbedCtx, '-ub', $EmbedCtx, '-t', $Cores)
+}
+
 $helperProc = $null
 if ($HasHelper) {
+    $helperArgs = @('-port', $Port, '-ui', $Ui, '-chats', $Chats, '-docs', $Docs,
+                    '-upstream', "127.0.0.1:$LlamaPort")
+    if ($EmbedPort) { $helperArgs += @('-embed', "127.0.0.1:$EmbedPort") }
     $helperProc = Start-Process -FilePath $Helper -PassThru -NoNewWindow `
         -RedirectStandardOutput (Join-Path $Dir 'logs\pocketd.log') `
         -RedirectStandardError  (Join-Path $Dir 'logs\pocketd.err.log') `
-        -ArgumentList @('-port', $Port, '-ui', $Ui, '-chats', $Chats, '-docs', $Docs,
-                        '-upstream', "127.0.0.1:$LlamaPort")
+        -ArgumentList $helperArgs
 }
 
 try {
@@ -128,6 +174,12 @@ try {
             Get-Content (Join-Path $Dir 'logs\pocketd.err.log') -Tail 15 -ErrorAction SilentlyContinue
             Read-Host "  Press Enter to close"; exit 1
         }
+        # The encoder is the one process whose death is survivable: pocketd
+        # stops embedding and search carries on lexically.
+        if ($embedProc -and $embedProc.HasExited) {
+            Write-Host "  ! Encoder exited - search is lexical only. See logs\embed.err.log"
+            $embedProc = $null
+        }
         try {
             Invoke-WebRequest "http://127.0.0.1:$Port/health" -UseBasicParsing -TimeoutSec 2 | Out-Null
             Write-Host "  + Ready - opening browser." -ForegroundColor Green
@@ -139,4 +191,5 @@ try {
 } finally {
     if (-not $proc.HasExited) { $proc.Kill() }
     if ($helperProc -and -not $helperProc.HasExited) { $helperProc.Kill() }
+    if ($embedProc -and -not $embedProc.HasExited) { $embedProc.Kill() }
 }

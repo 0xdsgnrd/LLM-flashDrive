@@ -2,6 +2,11 @@
 # Download a GGUF from Hugging Face into the drive's models/ folder.
 #   ./fetch-model.sh <hf-repo>            → lists available GGUF files
 #   ./fetch-model.sh <hf-repo> <filename> → downloads that file
+#   ./fetch-model.sh --embed <repo> <file> → ...into embed/ instead
+#
+# --embed is for the retrieval encoder. It goes in its own directory because
+# models/ is what the router enumerates and the picker offers, and an encoder
+# is neither: it answers no questions and must never be evicted to load one.
 #
 # If the file is pinned in drive.lock, the pinned REVISION is used instead of
 # main. main is a moving branch: a repo that re-quantises or re-tags upstream
@@ -12,7 +17,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DRIVE="${DRIVE:-/Volumes/Pocket-LLM}"
 LOCK="${LOCK:-$ROOT/drive.lock}"
-REPO="${1:?usage: fetch-model.sh <hf-repo> [filename]}"
+KIND=model; SUBDIR=models
+if [ "${1:-}" = "--embed" ]; then KIND=embed; SUBDIR=embed; shift; fi
+REPO="${1:?usage: fetch-model.sh [--embed] <hf-repo> [filename]}"
 FILE="${2:-}"
 
 if [ -z "$FILE" ]; then
@@ -34,7 +41,7 @@ fi
 # Match on repo AND filename: the same filename appears in several repos.
 REV=""
 if [ -f "$LOCK" ]; then
-  REV=$(awk -v r="$REPO" -v f="$FILE" '$1=="model" && $2==r && $4==f {print $3; exit}' "$LOCK")
+  REV=$(awk -v k="$KIND" -v r="$REPO" -v f="$FILE" '$1==k && $2==r && $4==f {print $3; exit}' "$LOCK")
 fi
 if [ -n "$REV" ]; then
   echo "  pinned revision ${REV:0:12} (from $(basename "$LOCK"))"
@@ -42,12 +49,13 @@ else
   REV=main
   echo "  ! $FILE is not pinned in drive.lock — falling back to main."
   echo "    Pin it first so this download is reproducible:"
-  echo "      ./scripts/lock-add.sh $REPO $FILE"
+  [ "$KIND" = embed ] && echo "      ./scripts/lock-add.sh --embed $REPO $FILE" \
+                      || echo "      ./scripts/lock-add.sh $REPO $FILE"
 fi
 
-mkdir -p "$DRIVE/models"
+mkdir -p "$DRIVE/$SUBDIR"
 URL="https://huggingface.co/$REPO/resolve/$REV/$FILE?download=true"
-OUT="$DRIVE/models/$FILE"
+OUT="$DRIVE/$SUBDIR/$FILE"
 echo "→ $OUT"
 
 # HuggingFace throttles sustained single-stream transfers: a connection starts
@@ -71,7 +79,7 @@ SIZE=$(curl -sIL "$URL" | awk 'BEGIN{IGNORECASE=1}/^content-length:/{n=$2}END{pr
 
 # Cross-check against the lock before spending an hour on the wrong bytes.
 if [ "$REV" != main ] && [ "$SIZE" -gt 0 ]; then
-  WANT=$(awk -v r="$REPO" -v f="$FILE" '$1=="model" && $2==r && $4==f {print $5; exit}' "$LOCK")
+  WANT=$(awk -v k="$KIND" -v r="$REPO" -v f="$FILE" '$1==k && $2==r && $4==f {print $5; exit}' "$LOCK")
   if [ -n "$WANT" ] && [ "$WANT" != "$SIZE" ]; then
     echo "  ✗ size disagrees with drive.lock: lock=$WANT remote=$SIZE"
     echo "    The pinned revision should be immutable — re-pin deliberately."

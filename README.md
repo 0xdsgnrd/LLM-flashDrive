@@ -50,11 +50,16 @@ helper is present:
 with pocketd            browser → pocketd :8080 ─┬─ ui/            (static)
                                                  ├─ /api/chats     (conversations)
                                                  ├─ /api/docs      (documents)
-                                                 ├─ /api/search    (BM25 retrieval)
-                                                 └─ /v1/*  ──► llama-server :8081
+                                                 ├─ /api/search    (BM25 + vectors)
+                                                 ├─ /v1/*  ──► llama-server :8081  (chat, router)
+                                                 └─ ─────────► llama-server :8082  (encoder)
 
 without it              browser → llama-server :8080 ── ui/ + /v1/*   (history off)
 ```
+
+The encoder on :8082 is never reachable from the browser. It exists only to
+answer pocketd, which is why adding it changed nothing about the single-origin
+property that makes CORS a non-topic here.
 
 `scripts/devserver.mjs` has always done the proxying half of this in development;
 pocketd is that file, compiled and portable.
@@ -85,6 +90,10 @@ What it does, in the order it matters:
   from `machine.json`, which only the launcher writes — so the bands fall back to
   the parameter count in the filename, and the picker stays grouped even when
   pocketd is run on its own.
+- **Which retriever is running** is stated under the documents switch —
+  *Matching words and meaning*, or *Matching words only* on a drive with no
+  encoder. "Why did it not find that?" has a different answer depending on
+  which half is live, and the difference is otherwise invisible.
 - **Light and dark** both first-class. The system setting decides until the
   switch in the top bar is used; that choice is then stored on the drive with
   everything else, so a borrowed laptop still keeps nothing.
@@ -126,38 +135,141 @@ against the next person to plug the drive in, not against someone with recovery
 tools. The two are separate on purpose — a reference set you are happy to pass on
 is a different thing from your conversations.
 
-## Retrieval, and why it is lexical
+## Retrieval: words, and now meaning
 
 Drop text files onto the window, tick **Use in answers**, and each question is
 searched against them first; the best passages are prepended to that one request
 and the answer cites which documents it used.
 
-Search is **BM25 inside pocketd**, not embeddings. That buys a lot: no embedding
-model on the drive, no second `llama-server` instance, no extra RAM, nothing new
-in `drive.lock` — and for your own notes the words you search with are usually the
-words you wrote. What it cannot do is match on meaning: ask about "cars" and a
-document that only ever says "automobile" will not come back. That is the upgrade
-path, not a defect.
+Search used to be BM25 alone, and BM25 alone has a hole in it big enough to see
+from across the room: ask about **cars** and a document that only ever says
+*automobile* never comes back, because the two share no term. So the drive now
+runs a second retriever over the same passages — a small encoder that turns text
+into a vector, where "car" and "automobile" land next to each other.
 
-**There is no index file.** The index is rebuilt in memory from `docs/` at startup
-and after every change. A few megabytes rebuild in well under a second, and in
-exchange there is no index format to version, nothing half-written to detect, and
-nothing that can disagree with the documents themselves. Delete it and it returns.
+**Both, not one.** Replacing BM25 with vectors would have swapped one hole for
+another. An encoder is vague about exactly the things BM25 is exact about: a part
+number, an error code, a surname, a flag like `GGML_OPENMP`. Those are rare
+tokens with enormous IDF and almost no semantic neighbourhood, and a dense
+retriever will cheerfully return a passage that is *about* the same subject
+instead of the one containing the string you typed. Measured on this drive:
 
-Some deliberate details:
+| question | found by |
+|---|---|
+| `cars` → the automobile document | semantic only — no shared word |
+| `GGML_OPENMP` → the build-flags note | both |
+| `internal combustion engine` | both |
+| `xylophone marsupial quantum` | neither, correctly |
 
-- **Chunks are paragraph-aligned**, ~1000 characters with 150 of overlap. A
-  fragment starting mid-sentence reads as noise both to the model and to the
-  person checking the citation, and the overlap keeps a fact that straddles a
-  boundary findable from either side.
+### Fusing two rankings that do not share a scale
+
+BM25 scores are unbounded and corpus-relative. Cosine lives in [-1, 1] and, for
+most encoders, in a narrow band near the top of it. Adding them is meaningless,
+and normalising each list to [0, 1] is worse than it looks: it stretches whatever
+noise sits at the bottom of one list up to meet the signal at the top of the
+other.
+
+So the lists are fused by **rank**, not score — Reciprocal Rank Fusion, `1/(60+r)`
+summed across retrievers. Position is the one thing both retrievers agree on the
+meaning of, and a passage found by both rises above one found by either.
+
+### The floor, and why the obvious version does not work
+
+BM25 has a property worth keeping: no shared term, no result. Dense retrieval has
+no such thing — every passage has a cosine against every query — so without a
+floor, an unrelated question grounds its answer in whatever happened to be
+nearest. It cannot be a fixed cosine, either: 0.5 is "unrelated" for one encoder
+and "closely related" for another.
+
+The first attempt was to keep passages some number of standard deviations above
+the mean similarity **for that query**. Measured on bge-small over a ten-document
+corpus, it fails outright:
+
+```
+"how do I make bread rise"    → baking.md    z = +2.20   (right answer)
+"xylophone marsupial quantum" → music.md     z = +2.48   (pure noise)
+```
+
+The noise scores *higher*. When a query means nothing to the encoder the
+similarities collapse into a narrow band, the standard deviation shrinks with
+them, and whichever passage happens to lead is left standing several deviations
+clear of a mean it is barely above. Dividing by a quantity that collapses exactly
+when the answer should be "nothing here" cannot work.
+
+So the yardstick is the corpus instead of the query: **what two unrelated
+passages on this drive actually look like to this encoder**, measured from a
+sample of passage pairs. Same corpus, same encoder, same queries, scored against
+that baseline:
+
+```
+relevant    5.12   4.08   2.88   4.12
+noise       0.82   0.76  -0.14
+```
+
+which separates with room to spare. Nothing about it is tuned to a model: the
+baseline is remeasured whenever the vectors change, so it calibrates itself to
+whatever encoder the drive happens to carry. Pairs drawn from the same document
+are excluded — consecutive chunks deliberately overlap, and two halves of one
+paragraph are not evidence of what "unrelated" means.
+
+### A separate server, not another model in the router
+
+The encoder lives in `embed/`, not `models/`, and gets its own `llama-server`
+process. That is not tidiness. The router is started with `--models-max` derived
+from host RAM, and on an 8GB machine that number is **1** — so an encoder sharing
+the router would be evicted by every search and the chat model reloaded for every
+answer. A dedicated process holds ~320MB and never contends. Its size is
+subtracted from the RAM budget before the model-packing arithmetic, so it is
+spent once rather than counted twice.
+
+`embed/` empty is a supported configuration, not a broken one. No encoder, a
+server that never comes up, a query embedding that misses its 3-second deadline —
+each leaves BM25 answering alone, exactly as this drive did before, and the
+sidebar says *Matching words only* rather than pretending.
+
+### Embeddings are cached on the drive; the lexical index still is not
+
+There is still **no lexical index file**, for the reason there never was: it
+rebuilds from `docs/` in milliseconds, so a format that could be stale or
+half-written buys nothing.
+
+Vectors are the opposite — encoding a corpus is minutes of real compute, and
+doing it on every launch would make the drive unusable on the machine you just
+plugged it into. So `docs/<id>.vec` exists, and is written to be thrown away:
+
+- **Content-addressed.** Each vector is keyed by a hash of the passage text, not
+  its position. Re-adding a file, re-chunking, reordering documents — none of it
+  can pair a vector with the wrong passage. Adding one note to a drive holding a
+  thousand embedded passages encodes one passage.
+- **Self-invalidating.** The header records the encoder and dimension. Swap the
+  model in `embed/` and every cache is discarded on read rather than blending two
+  incompatible vector spaces into one ranking.
+- **Torn writes are free.** The payload must be exactly `count × record size`; if
+  it is not, the file is dropped and the vectors recomputed. Transcripts are
+  append-only because losing one costs you a conversation. Losing this costs a
+  few minutes of background work.
+
+Deleting every `.vec` on the drive has exactly one consequence: the next launch
+is busy for a while. `erase-documents.command` deletes them along with the
+documents — a vector is a lossy but real representation of the text it came from,
+so leaving it behind would leave part of the document behind.
+
+### Everything else about retrieval, unchanged
+
+- **Encoding never blocks anything.** Dropping in a 300-page PDF returns as soon
+  as the text is extracted and the lexical index is rebuilt — searchable by word
+  immediately — and the vectors arrive behind it while the drive is in use. The
+  sidebar counts down: *learning meanings 200/900*.
+- **Chunks are paragraph-aligned**, ~1000 characters with 150 of overlap.
 - **At most two passages per document**, so one long file cannot crowd out every
-  other source.
-- **The retrieved block is never stored.** It is prepended to a single request and
-  never enters the transcript, so it is not replayed on the next turn and does not
-  eat context forever. Only the document *names* are saved, as the citation line.
-- **Formats are extracted, not guessed at.** See the table below.
+  other source. This applies to the fused ranking, so it holds through the dense
+  path too.
+- **The retrieved block is never stored.** It is prepended to a single request,
+  never enters the transcript, is not replayed on the next turn and does not eat
+  context forever. Only the document *names* are saved, as the citation line.
 - **Retrieval failing never blocks an answer.** If search errors, the question
   goes to the model ungrounded.
+- **Formats are extracted, not guessed at.** See the table below.
 
 ### What can be added
 
@@ -193,7 +305,7 @@ reach the index — minified JavaScript would otherwise flood it with junk token
 ```
 repo (internal SSD — never develop on exFAT)
 ├── ui/                     zero-dependency chat UI (no CDN, works offline)
-├── helper/                 pocketd — front door, proxy, storage, extraction, BM25 search (Go)
+├── helper/                 pocketd — front door, proxy, storage, extraction, hybrid search (Go)
 ├── runtime/                launchers + erase scripts, copied to the drive
 ├── docker/                 dev image + linux/windows cross-build images
 ├── scripts/
@@ -201,7 +313,7 @@ repo (internal SSD — never develop on exFAT)
 │   ├── build-linux.sh      static, old glibc, GGML_NATIVE=OFF
 │   ├── build-windows.sh    mingw-w64 cross-compile, fully static
 │   ├── build-helper.sh     pocketd for all three platforms (no Go install needed)
-│   ├── fetch-model.sh      pull GGUFs straight to the drive
+│   ├── fetch-model.sh      pull GGUFs straight to the drive (--embed for the encoder)
 │   ├── devserver.mjs       static server + API proxy
 │   ├── verify-drive.sh     check the drive against drive.lock
 │   └── release.sh          stage everything → /Volumes/Pocket-LLM
@@ -221,6 +333,10 @@ brew install cmake && ./scripts/build-mac.sh
 # 2. get a model (lists available files if you omit the filename)
 ./scripts/fetch-model.sh <hf-repo>
 ./scripts/fetch-model.sh <hf-repo> <file.gguf>
+
+# 2b. get the retrieval encoder — optional; without it search is BM25 only
+./scripts/fetch-model.sh --embed unsloth/embeddinggemma-300m-GGUF \
+                                 embeddinggemma-300M-Q8_0.gguf
 
 # 3. stage to the drive
 ./scripts/release.sh
@@ -276,6 +392,18 @@ A drive holding only a 70B is useless on the 16GB laptops most people own.
 - **Fully static Windows build** — no mingw runtime DLLs required on the target.
 - **Ad-hoc codesign on arm64** — required by macOS; survives the copy to exFAT.
   Applies to `pocketd` too, not just `llama-server`.
+- **The encoder's identity must not be its path.** `llama-server` started with
+  `-m` reports the model's *absolute path* as its id — `/Volumes/Pocket-LLM/embed/…`
+  on macOS, `/media/<user>/…` on Linux, a drive letter on Windows. Keying the
+  vector cache on that would invalidate it on arrival at every new machine and
+  re-encode the whole corpus, which is the one cost the cache exists to avoid.
+  The filename is the part that travels with the drive.
+- **An oversized passage is refused, not truncated.** Retrieval encoders have
+  small contexts — bge-small trains at 512 tokens — and `llama-server` answers an
+  over-long input with `input (802 tokens) is larger than the max context size`,
+  failing the whole batch with it. Inputs are sized against the context the
+  server reports, and a refusal is halved and retried rather than being allowed
+  to stall a document.
 - **`pocketd` sidesteps all of the C++ traps above.** `CGO_ENABLED=0` produces a
   binary with no libc dependency at all, so there is no glibc version to match, no
   `libgomp`, and no mingw threading model to get wrong. It is the cheap half of
@@ -294,10 +422,17 @@ A drive holding only a 70B is useless on the 16GB laptops most people own.
 pins the llama.cpp tag the binaries were built from.
 
 ```bash
-./scripts/lock-add.sh <hf-repo> <file.gguf>   # resolve + pin a new model
-./scripts/verify-drive.sh                     # presence + byte size (seconds)
-./scripts/verify-drive.sh --sha               # + sha256 (minutes, reads everything)
+./scripts/lock-add.sh <hf-repo> <file.gguf>            # pin a chat model
+./scripts/lock-add.sh --embed <hf-repo> <file.gguf>    # pin the encoder
+./scripts/verify-drive.sh                              # presence + byte size (seconds)
+./scripts/verify-drive.sh --sha                        # + sha256 (minutes, reads everything)
 ```
+
+`model` and `embed` entries carry identical fields; the keyword says which
+directory the file belongs in on the drive, and therefore whether it is offered
+in the picker or runs as the encoder. The verifier reports which of the two
+retrievers the drive can actually do, because an absent encoder changes what
+search can find without producing a single error.
 
 **Size is not identity.** DeepSeek-R1-Distill-Llama-70B Q4_K_M and
 Llama-3.3-70B-Instruct Q4_K_M differ by 2,368 bytes out of 42.5GB — a size check

@@ -81,12 +81,12 @@ func TestDeletedDocumentLeavesTheIndex(t *testing.T) {
 	d := newDocs(t)
 	m, _ := d.AddText("secret.md", "the passphrase is hunter2 pomegranate")
 	ix := buildIndex(t, d)
-	if len(ix.Search("pomegranate", 3)) == 0 {
+	if len(ix.Search("pomegranate", 3, nil)) == 0 {
 		t.Fatal("document not searchable after add")
 	}
 	d.Delete(m.ID)
 	ix = buildIndex(t, d)
-	if hits := ix.Search("pomegranate", 3); len(hits) != 0 {
+	if hits := ix.Search("pomegranate", 3, nil); len(hits) != 0 {
 		t.Errorf("deleted document still searchable: %+v", hits)
 	}
 }

@@ -114,6 +114,10 @@ body.side-hidden #sidebar{width:0;opacity:0;border-right-width:0}
   font-size:12.5px;color:var(--muted);cursor:pointer;user-select:none}
 .use-docs input{margin:0;accent-color:var(--accent)}
 .use-docs:has(input:disabled){opacity:.45;cursor:default}
+/* Which half of retrieval is actually running. A drive without an encoder
+   searches by word alone, and that is a real difference in what it can find —
+   worth one quiet line rather than leaving it to be inferred from results. */
+.retrieval-mode{font-size:11px;color:var(--muted);padding:0 6px 4px 26px;line-height:1.4}
 
 .side-foot{border-top:1px solid var(--line-soft);padding:10px 12px 12px;
   display:flex;flex-direction:column;gap:8px}

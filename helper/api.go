@@ -15,6 +15,9 @@ type API struct {
 	Store *Store
 	Docs  *DocStore
 	Index *Index
+	// nil when the drive carries no embedding model. Every method on it is
+	// nil-safe, so the lexical path needs no branch of its own.
+	Vectors *Vectorizer
 }
 
 // Rebuild the whole index after any change to the corpus. Cheap at this scale,
@@ -28,6 +31,11 @@ func (a *API) reindex() {
 		return
 	}
 	a.Index.Build(metas, texts)
+	// Rebuilding drops every vector — the index has no model to recompute them
+	// with. They come back by content hash, from the drive's cache for passages
+	// that have not changed and from the embedding server for the ones that
+	// have, all of it behind this call rather than inside it.
+	a.Vectors.Wake()
 }
 
 // Everything the browser can persist goes through here. It is deliberately the
@@ -42,10 +50,21 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if a.Index != nil {
 			docs, chunks = a.Index.Stats()
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
+		body := map[string]any{
 			"ok": true, "history": a.Store != nil, "search": a.Docs != nil,
 			"docs": docs, "chunks": chunks,
-		})
+		}
+		// Reported separately from "search" because they fail separately: the
+		// lexical half can be working perfectly while the embedding server is
+		// still loading its model, and the UI should say which.
+		ready, working, model, note, embedded, total := a.Vectors.Status()
+		body["semantic"] = ready
+		body["semanticModel"] = model
+		body["semanticWorking"] = working
+		body["semanticNote"] = note
+		body["embedded"] = embedded
+		body["embeddable"] = total
+		writeJSON(w, http.StatusOK, body)
 		return
 	}
 
@@ -271,6 +290,7 @@ func (a *API) docs(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		a.Vectors.ForgetAll()
 		a.reindex()
 		writeJSON(w, http.StatusOK, map[string]int{"deleted": n})
 
@@ -298,6 +318,10 @@ func (a *API) doc(w http.ResponseWriter, r *http.Request, id string) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 			return
 		}
+		// A vector is a lossy but real representation of the passage it came
+		// from, so deleting the document has to delete its cache too, or part
+		// of it stays on the drive after the user believes it is gone.
+		a.Vectors.Forget(id)
 		a.reindex()
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 
@@ -318,7 +342,11 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 			k = n
 		}
 	}
-	writeJSON(w, http.StatusOK, a.Index.Search(q, k))
+	// The one synchronous embedding call in the program, on a short deadline.
+	// It returns nil for every failure — no model, server down, too slow — and
+	// a nil query vector is not an error condition, it is BM25.
+	qvec := a.Vectors.EmbedQuery(r.Context(), q)
+	writeJSON(w, http.StatusOK, a.Index.Search(q, k, qvec))
 }
 
 // DELETE /api/chats/{id}/last — drop the final message. Used by regenerate,

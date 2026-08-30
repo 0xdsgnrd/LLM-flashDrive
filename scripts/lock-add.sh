@@ -1,6 +1,11 @@
 #!/bin/bash
 # Resolve an HF model file to a pinned drive.lock entry and append it.
-#   ./scripts/lock-add.sh <hf-repo> <filename>
+#   ./scripts/lock-add.sh [--embed] <hf-repo> <filename>
+#
+# --embed pins a retrieval encoder rather than a chat model. It is the same
+# resolution and the same fields; only the keyword differs, because the two live
+# in different directories on the drive and only one of them is ever offered in
+# the model picker.
 #
 # Everything recorded is read from the HF API: the repo's current revision SHA,
 # the file's exact byte size, and its sha256 (HF stores the LFS oid, which IS
@@ -9,8 +14,10 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOCK="$ROOT/drive.lock"
-REPO="${1:?usage: lock-add.sh <hf-repo> <filename>}"
-FILE="${2:?usage: lock-add.sh <hf-repo> <filename>}"
+KIND=model
+if [ "${1:-}" = "--embed" ]; then KIND=embed; shift; fi
+REPO="${1:?usage: lock-add.sh [--embed] <hf-repo> <filename>}"
+FILE="${2:?usage: lock-add.sh [--embed] <hf-repo> <filename>}"
 
 api () { curl -fsSL "https://huggingface.co/api/models/$1" 2>/dev/null; }
 
@@ -49,8 +56,8 @@ if grep -q "  $FILE  " "$LOCK" 2>/dev/null; then
   echo "! $FILE is already in drive.lock — remove it first to re-pin."; exit 1
 fi
 
-printf '\nmodel  %s  %s  %s  %s  %s\n' "$REPO" "$REV" "$FILE" "$SIZE" "$SHA" >> "$LOCK"
-echo "✓ pinned $FILE"
+printf '\n%s  %s  %s  %s  %s  %s\n' "$KIND" "$REPO" "$REV" "$FILE" "$SIZE" "$SHA" >> "$LOCK"
+echo "✓ pinned $FILE ($KIND)"
 echo "    repo      $REPO"
 echo "    revision  $REV"
 echo "    size      $SIZE bytes ($((SIZE/1024/1024/1024)) GiB)"

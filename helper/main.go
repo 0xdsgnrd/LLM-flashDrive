@@ -15,6 +15,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -48,6 +49,19 @@ func main() {
 		docsDir  = flag.String("docs", "docs", "directory for indexed documents")
 		upstream = flag.String("upstream", "127.0.0.1:8081", "llama-server host:port")
 		showVer  = flag.Bool("version", false, "print version and exit")
+
+		// Semantic retrieval, all of it optional. Empty -embed means no
+		// embedding server, which means search is BM25 exactly as it was.
+		embed = flag.String("embed", "", "llama-server --embeddings host:port for semantic search (empty = lexical only)")
+		// "auto" picks the instruction prefix from the model the embedding
+		// server reports. Every current retrieval encoder is trained with an
+		// asymmetric one and omitting it costs real ranking quality, but they
+		// are per-model, so an unrecognised model can be told explicitly.
+		embedQueryPfx = flag.String("embed-query-prefix", "auto", "instruction prefix for query embeddings")
+		embedDocPfx   = flag.String("embed-doc-prefix", "auto", "instruction prefix for passage embeddings")
+		// Standard deviations above the mean similarity a passage must reach to
+		// count as a semantic match. See the comment on defaultMinZ.
+		embedMinZ = flag.Float64("embed-min-z", defaultMinZ, "semantic match floor, in std devs above the query's mean similarity")
 	)
 	flag.Parse()
 	if *showVer {
@@ -74,6 +88,7 @@ func main() {
 		docs = nil
 	}
 	index := NewIndex()
+	index.SetMinZ(*embedMinZ)
 	if docs != nil {
 		// Built at startup from the documents themselves. There is no index
 		// file to load, so there is nothing to be stale or half-written.
@@ -83,6 +98,21 @@ func main() {
 				log.Printf("pocketd: indexed %d document(s), %d chunk(s)", d, c)
 			}
 		}
+	}
+
+	// The second half of retrieval. It is wired up only when the launcher found
+	// an embedding model on the drive and started a server for it; without one,
+	// vectorizer stays nil and every call on it is a no-op, so the lexical path
+	// below is untouched rather than conditionally disabled.
+	var vectorizer *Vectorizer
+	if docs != nil && strings.TrimSpace(*embed) != "" {
+		emb := NewEmbedder("http://"+strings.TrimSpace(*embed), *embedQueryPfx, *embedDocPfx)
+		vectorizer = NewVectorizer(index, emb, NewVecStore(*docsDir))
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go vectorizer.Run(ctx)
+		vectorizer.Wake()
+		log.Printf("pocketd: semantic search enabled via %s", *embed)
 	}
 
 	target, err := url.Parse("http://" + *upstream)
@@ -100,7 +130,7 @@ func main() {
 		})
 	}
 
-	api := &API{Store: store, Docs: docs, Index: index}
+	api := &API{Store: store, Docs: docs, Index: index, Vectors: vectorizer}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -114,8 +144,12 @@ func main() {
 	})
 
 	addr := fmt.Sprintf("127.0.0.1:%d", *port)
-	log.Printf("pocketd %s: ui %s · chats %s · docs %s · upstream %s · listening on %s",
-		version, absUI, *chatsDir, *docsDir, *upstream, addr)
+	retrieval := "lexical"
+	if vectorizer != nil {
+		retrieval = "lexical + semantic"
+	}
+	log.Printf("pocketd %s: ui %s · chats %s · docs %s (%s) · upstream %s · listening on %s",
+		version, absUI, *chatsDir, *docsDir, retrieval, *upstream, addr)
 	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Fatalf("pocketd: %v", err)
 	}

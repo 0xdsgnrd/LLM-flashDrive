@@ -39,7 +39,18 @@ fi
 
 n=0
 for f in "${FILES[@]}"; do rm -f "$f" && n=$((n+1)); done
-# The search index lives only in memory and is rebuilt from these files, so
-# deleting them is the whole operation — there is no stale index left behind.
+
+# The lexical index lives only in memory and is rebuilt from these files, so
+# deleting them is the whole operation there. The embedding cache is different:
+# it is on the drive, and a vector is a lossy but real representation of the
+# passage it was made from. Leaving it behind would leave part of the document
+# behind, which is precisely what this script exists to prevent.
+shopt -s nullglob
+VECS=("$DOCS"/*.vec "$DOCS"/*.vec.tmp)
+shopt -u nullglob
+v=0
+for f in "${VECS[@]}"; do rm -f "$f" && v=$((v+1)); done
+
 echo "  ✓ Erased $n document(s)."
+[ "$v" -eq 0 ] || echo "  ✓ Erased $v embedding cache file(s)."
 echo; read -r -p "  Press Return to close."

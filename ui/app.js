@@ -11,6 +11,7 @@ let currentModel = null;      // null => let the server choose
 let savedModel = null;        // preference read back from the drive, not localStorage
 let searchOn = false;         // pocketd can store and index documents
 let useDocs = false;          // ...and the user wants answers grounded in them
+let semanticOn = false;       // ...and an encoder on the drive can match meaning
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -769,11 +770,14 @@ function newChat() {
 
 /* ---------- documents (retrieval) ---------- */
 
-// Retrieval is lexical (BM25) inside pocketd. No embedding model on the drive,
-// no second llama-server, nothing added to drive.lock — and for searching your
-// own notes the words you ask with are usually the words you wrote. It will not
-// match "car" against a document that only says "automobile"; that is the
-// upgrade path, not a bug.
+// Retrieval is hybrid inside pocketd: BM25 over the words, and — when the drive
+// carries an encoder in embed/ — cosine over the meanings, fused by rank.
+//
+// The two halves fail independently, which is why they are reported separately.
+// Lexical search needs nothing but pocketd. Semantic search additionally needs
+// an encoder on the drive, a second server for it, and time to have embedded
+// the corpus; any of those missing leaves BM25 answering alone, exactly as this
+// drive did before. Nothing here degrades to browser storage or to silence.
 async function initDocs(health) {
   searchOn = !!health?.search;
   if (!searchOn) {
@@ -782,7 +786,47 @@ async function initDocs(health) {
     $('docs-section').hidden = true;
     return;
   }
+  applyRetrievalMode(health);
   await refreshDocs();
+}
+
+// One line under the switch, because "why did it not find that?" has a
+// different answer depending on which retrievers are running, and the
+// difference is otherwise invisible.
+function applyRetrievalMode(health) {
+  semanticOn = !!health?.semantic;
+  const el = $('retrieval-mode');
+  if (!el) return;
+
+  const embedded = health?.embedded ?? 0;
+  const total = health?.embeddable ?? 0;
+
+  let text;
+  if (!semanticOn) {
+    text = health?.semanticNote || 'Matching words only';
+  } else if (health?.semanticWorking && total > embedded) {
+    // A half-embedded corpus ranks on half a corpus. Saying so beats letting
+    // the answers quietly improve while somebody wonders what changed.
+    text = `Matching words · learning meanings ${embedded}/${total}`;
+  } else {
+    text = 'Matching words and meaning';
+  }
+  el.textContent = text;
+  el.hidden = docCount === 0;
+  el.title = semanticOn
+    ? `Semantic matching by ${health?.semanticModel || 'the encoder on this drive'}`
+    : 'No encoder in embed/ on this drive — a document that says "automobile" '
+      + 'will not answer a question about cars';
+}
+
+// Polled only while there is something to watch. Embedding a large corpus takes
+// minutes, and a counter that never moves is worse than no counter.
+async function pollRetrieval() {
+  if (!searchOn) return;
+  let health;
+  try { health = await api('/health'); } catch { return; }
+  applyRetrievalMode(health);
+  if (health?.semanticWorking) setTimeout(pollRetrieval, 3000);
 }
 
 async function refreshDocs() {
@@ -813,6 +857,9 @@ async function refreshDocs() {
   // Nothing to ground an answer in means the switch would be a lie.
   if (!list.length) useDocs = false;
   syncDocsToggle();
+  // Adding a document starts a round of embedding behind the upload, so this
+  // is exactly the moment the counter has something to say.
+  pollRetrieval();
   return list;
 }
 

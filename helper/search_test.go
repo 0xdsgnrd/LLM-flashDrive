@@ -32,7 +32,7 @@ func TestSearchRanksTheRelevantDocumentFirst(t *testing.T) {
 	d.AddText("models.md", "Quantisation shrinks a model by storing weights at lower precision, trading a little quality for a lot of memory.")
 
 	ix := buildIndex(t, d)
-	hits := ix.Search("why should I eject the drive", 3)
+	hits := ix.Search("why should I eject the drive", 3, nil)
 	if len(hits) == 0 {
 		t.Fatal("no hits")
 	}
@@ -40,7 +40,7 @@ func TestSearchRanksTheRelevantDocumentFirst(t *testing.T) {
 		t.Errorf("top hit = %s, want ejecting.md (scores: %+v)", hits[0].DocName, hits)
 	}
 
-	hits = ix.Search("quantisation memory tradeoff", 3)
+	hits = ix.Search("quantisation memory tradeoff", 3, nil)
 	if len(hits) == 0 || hits[0].DocName != "models.md" {
 		t.Errorf("quantisation query returned %+v", hits)
 	}
@@ -50,10 +50,10 @@ func TestSearchReturnsNothingForUnrelatedQuery(t *testing.T) {
 	d := newDocs(t)
 	d.AddText("a.md", "the drive must be ejected before removal")
 	ix := buildIndex(t, d)
-	if hits := ix.Search("xylophone marsupial", 3); len(hits) != 0 {
+	if hits := ix.Search("xylophone marsupial", 3, nil); len(hits) != 0 {
 		t.Errorf("expected no hits, got %+v", hits)
 	}
-	if hits := ix.Search("", 3); len(hits) != 0 {
+	if hits := ix.Search("", 3, nil); len(hits) != 0 {
 		t.Errorf("empty query should return nothing, got %d", len(hits))
 	}
 }
@@ -71,7 +71,7 @@ func TestSearchCapsHitsPerDocument(t *testing.T) {
 	d.AddText("short.md", "Ejecting the drive flushes pending writes.")
 
 	ix := buildIndex(t, d)
-	hits := ix.Search("ejecting the drive", 6)
+	hits := ix.Search("ejecting the drive", 6, nil)
 	perDoc := map[string]int{}
 	for _, h := range hits {
 		perDoc[h.DocName]++
@@ -90,9 +90,9 @@ func TestSearchIsDeterministic(t *testing.T) {
 		d.AddText("same.md", s)
 	}
 	ix := buildIndex(t, d)
-	first := ix.Search("drive", 3)
+	first := ix.Search("drive", 3, nil)
 	for i := 0; i < 25; i++ {
-		again := ix.Search("drive", 3)
+		again := ix.Search("drive", 3, nil)
 		for j := range first {
 			if again[j].DocID != first[j].DocID || again[j].Chunk != first[j].Chunk {
 				t.Fatalf("ranking changed between identical searches at %d", j)

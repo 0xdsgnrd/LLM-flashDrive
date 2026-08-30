@@ -18,7 +18,7 @@ if pgrep -f "$DRIVE/bin/" >/dev/null 2>&1; then
 fi
 
 echo "Staging → $DRIVE"
-mkdir -p "$DRIVE"/{bin/{mac-arm64,linux-x64,win-x64},models,ui,logs,chats,docs}
+mkdir -p "$DRIVE"/{bin/{mac-arm64,linux-x64,win-x64},models,embed,ui,logs,chats,docs}
 
 # --- binaries (only those that have been built) ------------------------
 staged=0
@@ -95,6 +95,13 @@ if compgen -G "$DRIVE/chats/*.jsonl" >/dev/null 2>&1; then
 fi
 if compgen -G "$DRIVE/docs/*.doc" >/dev/null 2>&1; then
   echo "  · docs/  ($(ls "$DRIVE"/docs/*.doc | wc -l | tr -d ' ') document(s) — untouched)"
+fi
+# The encoder decides whether search is lexical or hybrid, and it is the one
+# input whose absence changes behaviour silently rather than loudly.
+if compgen -G "$DRIVE/embed/*.gguf" >/dev/null 2>&1; then
+  echo "  · embed/ ($(basename "$(ls "$DRIVE"/embed/*.gguf | head -1)") — semantic search on)"
+else
+  echo "  · embed/ (empty — search will be lexical only; ./scripts/fetch-model.sh --embed ...)"
 fi
 
 # --- hygiene -----------------------------------------------------------

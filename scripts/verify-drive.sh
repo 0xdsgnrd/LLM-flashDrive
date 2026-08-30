@@ -42,9 +42,11 @@ echo "lock  : $(basename "$LOCK")"
 [ $CHECK_SHA -eq 1 ] && echo "mode  : full (sha256 — reads every byte)" || echo "mode  : quick (size only; --sha for content)"
 echo
 
-# ---- models pinned in the lock ----------------------------------------
-while read -r name want sha; do
-  f="$DRIVE/models/$name"
+# ---- models and the encoder pinned in the lock ------------------------
+# Both kinds carry identical fields and differ only in the directory they live
+# in on the drive, so one loop verifies both.
+while read -r kind name want sha; do
+  case "$kind" in embed) f="$DRIVE/embed/$name" ;; *) f="$DRIVE/models/$name" ;; esac
   if [ ! -f "$f" ]; then
     printf '  ·  %-46s not on drive\n' "$name"; MISSING=$((MISSING+1)); continue
   fi
@@ -76,14 +78,14 @@ while read -r name want sha; do
     printf '  ✓  %-46s %s bytes\n' "$name" "$have"
   fi
   OK=$((OK+1))
-done < <(awk '$1=="model"{print $4, $5, $6}' "$LOCK")
+done < <(awk '$1=="model" || $1=="embed"{print $1, $4, $5, $6}' "$LOCK")
 
 # ---- anything on the drive the lock does not know about ---------------
 UNPINNED=0
-for f in "$DRIVE"/models/*.gguf; do
+for f in "$DRIVE"/models/*.gguf "$DRIVE"/embed/*.gguf; do
   [ -e "$f" ] || continue
   n=$(basename "$f")
-  awk -v n="$n" '$1=="model" && $4==n {found=1} END{exit !found}' "$LOCK" && continue
+  awk -v n="$n" '($1=="model" || $1=="embed") && $4==n {found=1} END{exit !found}' "$LOCK" && continue
   printf '  ?  %-46s on drive but NOT pinned in the lock\n' "$n"
   UNPINNED=$((UNPINNED+1))
 done
@@ -126,6 +128,22 @@ if [ "$NDOC" -gt 0 ]; then
   printf '  !  docs/   %s indexed document(s) — erase before handing the drive on\n' "$NDOC"
 else
   printf '  ✓  docs/   empty\n'
+fi
+
+# A .vec is a lossy but real representation of the text it came from, so it is
+# the user's data too and it counts for the same reason the documents do.
+NVEC=0
+for f in "$DRIVE"/docs/*.vec; do [ -e "$f" ] && NVEC=$((NVEC+1)); done
+[ "$NVEC" -eq 0 ] || printf '  !  docs/   %s embedding cache file(s) — erased with the documents\n' "$NVEC"
+
+# Which half of retrieval this drive can actually do. The encoder's absence
+# changes behaviour without any error, so it is worth stating outright.
+NENC=0
+for f in "$DRIVE"/embed/*.gguf; do [ -e "$f" ] && NENC=$((NENC+1)); done
+if [ "$NENC" -gt 0 ]; then
+  printf '  ✓  search   lexical + semantic (%s)\n' "$(basename "$(ls "$DRIVE"/embed/*.gguf | head -1)" .gguf)"
+else
+  printf '  ·  search   lexical only — no encoder in embed/\n'
 fi
 
 # The host's own binary can be run, so check it was built from the pinned
