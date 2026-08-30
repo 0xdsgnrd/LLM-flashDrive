@@ -370,6 +370,11 @@ role. It now decides two things:
 | 32 GB | 22.4 GB | 2 | all three |
 | 128 GB | 89.6 GB | 3 | all three |
 
+Those budgets are before the encoder. One in `embed/` stays resident for the
+whole session, so its size comes off the top before any of this arithmetic runs:
+EmbeddingGemma-300M costs 0.31GB, which is why an 8GB machine's real budget is
+3.7GB rather than 4.0GB. It is spent once, not counted against every model.
+
 Both bounds in the budget are needed: the percentage alone starves big machines
 (a 32GB box skips a 20GB model by 0.8GB), while the absolute floor alone lets an
 8GB box load a 5GB model with 3GB left for the OS.
