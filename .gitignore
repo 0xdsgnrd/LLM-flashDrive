@@ -7,3 +7,7 @@ __pycache__/
 *.log
 .DS_Store
 ._*
+
+# Scratch chats/docs from running pocketd locally against the repo copy of ui/
+.testdata/
+ui/machine.json

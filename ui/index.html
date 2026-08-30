@@ -12,8 +12,8 @@
      usable from JS-built markup via <use> without duplicating any paths. -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
   <symbol id="i-mark" viewBox="0 0 24 24">
-    <rect x="3" y="3" width="18" height="18" rx="5.5"/>
-    <path d="M8.8 16.4V7.6h3.4a2.7 2.7 0 0 1 0 5.4H8.8"/></symbol>
+    <path style="fill:currentColor;stroke:none" d="M4.52,8.88l1.12.02V3.17c0-.27.11-.54.32-.76s.48-.32.76-.32h10.68s0,0,0,0c.23.02.46.13.64.31.23.23.33.53.32.83h0v5.64s1.12,0,1.12,0v6.53c0,1.92-.73,3.83-2.19,5.29-2.92,2.92-7.65,2.92-10.57,0-1.46-1.46-2.19-3.37-2.19-5.29v-6.53M17.35,15.42v-4.4H6.66v4.4c0,1.37.52,2.73,1.56,3.78,2.08,2.08,5.47,2.08,7.55,0,1.04-1.04,1.56-2.41,1.57-3.78M8.8,5.15l2.15-.02-.02,2.14h-2.12s0-2.12,0-2.12M13.06,5.14l2.15.02v2.13h-2.12s-.02-2.15-.02-2.15M16.22,4.24H7.78s.02,4.65.02,4.65h8.42s0-4.65,0-4.65Z"/>
+    <line style="fill:none;stroke:currentColor;stroke-width:1.5" x1="12" y1="12.97" x2="12" y2="17.83"/></symbol>
   <symbol id="i-panel" viewBox="0 0 24 24">
     <rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9.5 4v16"/></symbol>
   <symbol id="i-pencil" viewBox="0 0 24 24">
@@ -36,9 +36,12 @@
     <path d="M13 3v6h6"/></symbol>
   <symbol id="i-msg" viewBox="0 0 24 24">
     <path d="M20 14.5A2.5 2.5 0 0 1 17.5 17H9l-4 3.5V6.5A2.5 2.5 0 0 1 7.5 4h10A2.5 2.5 0 0 1 20 6.5Z"/></symbol>
-  <symbol id="i-spark" viewBox="0 0 24 24">
-    <path d="M13 3L5.5 13H11l-.5 8L18 11h-5.5L13 3Z"/></symbol>
   <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="4"/>
+    <path d="M12 2.5v2M12 19.5v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2.5 12h2M19.5 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24">
+    <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></symbol>
   <symbol id="i-book" viewBox="0 0 24 24">
     <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v15H6.5A2.5 2.5 0 0 0 4 20.5Z"/>
     <path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H19v3H6.5A2.5 2.5 0 0 1 4 20.5Z"/></symbol>
@@ -63,7 +66,7 @@
   </div>
 
   <div class="side-scroll">
-    <section>
+    <section id="docs-section" hidden>
       <div class="side-label">
         <span id="docs-label">Documents</span>
         <button id="add-docs" title="Add documents" aria-label="Add documents">
@@ -105,6 +108,8 @@
       <svg class="ic"><use href="#i-plus"/></svg></button>
     <div class="spacer"></div>
     <div id="history-badge" class="badge" hidden>History off</div>
+    <button id="theme-btn" class="icon-btn" title="Switch to dark" aria-label="Switch theme">
+      <svg class="ic"><use href="#i-moon"/></svg></button>
   </header>
 
   <div id="messages"></div>
@@ -130,8 +135,6 @@
     </div>
     <div class="hint">Runs entirely on this machine. Nothing leaves this computer.</div>
   </form>
-
-  <div id="suggestions" hidden></div>
 </main>
 
 <input type="file" id="doc-input" multiple hidden

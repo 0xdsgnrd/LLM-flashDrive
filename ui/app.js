@@ -273,29 +273,29 @@ async function copyText(text, btn) {
 
 /* --------------------------------------------------------- empty state */
 
-const SUGGESTIONS = [
-  ['Explain this code', 'paste a snippet and ask what it does'],
-  ['Draft a reply', 'a short, polite decline to a meeting invite'],
-  ['Plan something', 'break a task into steps I can actually start'],
-];
-
 function setEmpty(on) {
   $('main').classList.toggle('is-empty', on);
-  $('suggestions').hidden = !on;
   if (!on) { msgs.querySelector('.hero')?.remove(); return; }
-
   msgs.innerHTML = `<div class="hero">${icon('mark').replace('class="ic"', 'class="ic mark"')}` +
     `<h1>${esc(currentModel ? displayName(currentModel) : 'Pocket LLM')}</h1></div>`;
+}
 
-  const items = SUGGESTIONS.slice();
-  if (searchOn && docCount > 0) {
-    items[0] = ['Ask about your documents', `search the ${docCount} file(s) on this drive`];
-  }
-  $('suggestions').innerHTML =
-    `<div class="sugg-head">${icon('spark')}Suggested</div>` +
-    items.map(([t, s]) =>
-      `<button class="sugg" type="button" data-fill="${esc(t)}"><b>${esc(t)}</b><span>${esc(s)}</span></button>`
-    ).join('');
+/* -------------------------------------------------------------- theme ---
+   The system setting decides until the user says otherwise. The choice is then
+   stored on the drive with everything else — a borrowed laptop keeps nothing,
+   including this. */
+
+const prefersDark = () => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
+const resolvedTheme = () => settings.theme || (prefersDark() ? 'dark' : 'light');
+
+function applyTheme() {
+  const root = document.documentElement;
+  if (settings.theme) root.dataset.theme = settings.theme;
+  else delete root.dataset.theme;
+  const dark = resolvedTheme() === 'dark';
+  const btn = $('theme-btn');
+  btn.innerHTML = icon(dark ? 'sun' : 'moon');   // offer the other one
+  btn.title = dark ? 'Switch to light' : 'Switch to dark';
 }
 
 /* ---------------------------------------------------------- connection */
@@ -386,10 +386,11 @@ async function populateModels(ids) {
     b.dataset.model = id;
     b.title = id;                                            // full on-disk name
     b.disabled = !fits;
-    b.innerHTML =
-      `<span>${esc(isPart ? id : displayName(id))}</span>` +
-      (tag ? `<span class="tag">${tag}</span>` : '') +
-      `<span class="size">${meta ? prettyBytes(meta.bytes) : ''}${note ? ' · ' + note : ''}</span>`;
+    let text = esc(isPart ? id : displayName(id));
+    if (meta) text += ` · ${prettyBytes(meta.bytes)}`;
+    if (tag)  text += ` (${tag})`;
+    b.innerHTML = `<span class="tick">${icon('check')}</span><span>${text}` +
+      (note ? `<span class="note"> — ${note}</span>` : '') + '</span>';
     if (fits && firstUsable === null) firstUsable = id;
     menu.appendChild(b);
   };
@@ -627,6 +628,7 @@ async function initHistory(health) {
   try { settings = await api('/settings'); } catch { settings = {}; }
   savedModel = settings.model ?? null;
   useDocs = !!settings.useDocs;
+  applyTheme();
 
   // Pick up where the last session stopped, the way restoring from browser
   // storage used to — only now it follows the drive, not the machine.
@@ -752,10 +754,9 @@ function newChat() {
 async function initDocs(health) {
   searchOn = !!health?.search;
   if (!searchOn) {
-    $('add-docs').hidden = true;
+    // Nothing can be stored, so every affordance for storing would be a lie.
     $('attach').hidden = true;
-    $('doc-list').innerHTML =
-      '<div class="side-empty">Unavailable — the drive can’t be written to here.</div>';
+    $('docs-section').hidden = true;
     return;
   }
   await refreshDocs();
@@ -782,16 +783,13 @@ async function refreshDocs() {
     };
     box.appendChild(row);
   }
-  if (!list.length) {
-    box.innerHTML = '<div class="side-empty">None yet — add text, PDF, Office ' +
-      'or archive files to search them.</div>';
-  }
-
-  $('docs-label').textContent = list.length ? `Documents (${list.length})` : 'Documents';
+  // With nothing in it the whole block is hidden rather than explaining its own
+  // emptiness; the composer's + and drag-and-drop are how documents get added.
+  $('docs-section').hidden = list.length === 0;
+  $('docs-label').textContent = `Documents (${list.length})`;
   // Nothing to ground an answer in means the switch would be a lie.
   if (!list.length) useDocs = false;
   syncDocsToggle();
-  if ($('main').classList.contains('is-empty')) setEmpty(true);   // refresh suggestions
   return list;
 }
 
@@ -817,12 +815,20 @@ const docsError = (m) => pendingNotes.push([m, 'side-error']);
 const docsNote  = (m) => pendingNotes.push([m, 'side-note']);
 
 function flushDocsMessages() {
-  for (const [msg, cls] of pendingNotes.splice(0)) {
+  const notes = pendingNotes.splice(0);
+  if (!notes.length) return;
+  // "This PDF is a scan" has to be readable even when the block it belongs to is
+  // hidden because nothing was successfully added.
+  $('docs-section').hidden = false;
+  for (const [msg, cls] of notes) {
     const el = document.createElement('div');
     el.className = cls;
     el.textContent = msg;
     $('doc-list').prepend(el);
-    setTimeout(() => el.remove(), 7000);
+    setTimeout(() => {
+      el.remove();
+      if (docCount === 0 && !$('doc-list').children.length) $('docs-section').hidden = true;
+    }, 7000);
   }
 }
 
@@ -941,6 +947,11 @@ $('doc-input').addEventListener('change', async (e) => {
   await addDocs(files);
 });
 $('use-docs').addEventListener('change', (e) => setUseDocs(e.target.checked));
+$('theme-btn').addEventListener('click', () => {
+  settings.theme = resolvedTheme() === 'dark' ? 'light' : 'dark';
+  saveSettings();
+  applyTheme();
+});
 $('docs-chip').addEventListener('click', () => setUseDocs(!useDocs));
 
 // Message and code actions are delegated: a streaming message replaces its own
@@ -956,8 +967,6 @@ document.addEventListener('click', (e) => {
     if (act.dataset.act === 'again') regenerate();
     return;
   }
-  const sugg = e.target.closest('.sugg');
-  if (sugg) { input.value = sugg.dataset.fill + ' '; grow(); input.focus(); }
 });
 
 // Jump-to-latest, shown only when the view has actually drifted from the end.
@@ -978,6 +987,7 @@ document.addEventListener('drop', (e) => {
 });
 
 (async () => {
+  applyTheme();                    // system setting, until the drive says otherwise
   setEmpty(true);
   let health = {};
   try { health = await api('/health'); } catch {}
