@@ -82,7 +82,9 @@ What it does, in the order it matters:
   search box, because that is how people remember a conversation.
 - **The model picker** shows what each model costs and greys out what this
   machine cannot run, still banded Fast / Balanced / Best quality.
-- **Light and dark** both first-class, following the system setting.
+- **Light and dark** both first-class. The system setting decides until the
+  switch in the top bar is used; that choice is then stored on the drive with
+  everything else, so a borrowed laptop still keeps nothing.
 
 Everything renders escaped: HTML in an answer, in a table cell, in a code fence
 or in a document title is shown as text, never as markup.
