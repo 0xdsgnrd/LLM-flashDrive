@@ -84,6 +84,16 @@ case "$FS" in
 esac
 [ -w "$DRIVE" ] || fail "$DRIVE is not writable"
 
+# Checked here rather than at staging time, because the binary downloads below
+# write into bin/ and this has to gate them too. Replacing a Mach-O that a live
+# process has mapped leaves the volume's cached pages inconsistent with the
+# signature the kernel then checks, and macOS answers that with SIGKILL — from a
+# file whose bytes and signature are both perfectly valid on disk.
+if pgrep -f "$DRIVE/bin/" >/dev/null 2>&1; then
+  fail "Pocket LLM is running from this drive.
+    Close its window, or: pkill -f '$DRIVE/bin/'"
+fi
+
 say "drive   : $DRIVE"
 say "format  : $FS ✓"
 say "capacity: $(python3 -c "print('%.1f GiB' % ($TOTAL/$G))")"
@@ -235,10 +245,6 @@ echo
 # they are text, they are in git, and you are already holding them.
 echo "Staging"
 echo "─────────────────────────────────────────"
-if pgrep -f "$DRIVE/bin/" >/dev/null 2>&1; then
-  fail "Pocket LLM is running from this drive. Close its window (or: pkill -f '$DRIVE/bin/') and re-run."
-fi
-
 cp -f "$ROOT/ui"/* "$DRIVE/ui/" && say "✓ ui/"
 cp -f "$ROOT/runtime/run-mac.command" "$ROOT/runtime/run-linux.sh" "$DRIVE/"
 cp -f "$ROOT/runtime/run-windows.bat" "$ROOT/runtime/run-windows.ps1" "$DRIVE/"

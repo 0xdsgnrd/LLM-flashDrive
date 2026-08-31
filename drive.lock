@@ -50,3 +50,27 @@ embed  unsloth/embeddinggemma-300m-GGUF  6661a6504c30d8304af13455cb4a5d4f5bc6011
 model  unsloth/gpt-oss-20b-GGUF  d449b42d93e1c2c7bda5312f5c25c8fb91dfa9b4  gpt-oss-20b-Q4_K_M.gguf  11624759488  c27536640e410032865dc68781d80a08b98f8db5e93575919af8ccc0568aeb4f  64
 
 model  unsloth/Mistral-Small-3.2-24B-Instruct-2506-GGUF  b750ec2299225e492f1bd27cab88a0a595fa848f  Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf  14333922848  a3cc56310807ed0d145eaf9f018ccda9ae7ad8edb41ec870aa2454b0d4700b3c  64
+
+# ---------------------------------------------------------------- binaries
+# release  <tag>  <github-repo>
+# binary   <path-on-drive>  <bytes>  <sha256>
+#
+# The repo is recorded rather than read from git's origin, because a fork's
+# origin is the fork — which has no release — and provisioning would dead-end
+# on the most natural thing an interested person does. Forking and then
+# publishing your own re-pins this line to your repo, which is correct.
+#
+# Published by release-binaries.sh, fetched by provision.sh. The asset name in
+# the GitHub release is this path with '/' swapped for '-', because release
+# assets share one flat namespace and three files are called llama-server.
+#
+# Pinning these by hash is what lets verify-drive.sh check the Linux and
+# Windows binaries at all: it has only ever been able to run --version against
+# the host's own, and a binary you cannot execute you cannot interrogate.
+release  v1.0.0  0xdsgnrd/flashDrive-LLM
+binary   mac-arm64/llama-server   17332144  2017853e79782bf65b8a94694f79069286a085cb020a2c6d001bd5143a49ccf0
+binary   mac-arm64/pocketd        7258576  9fbb12d0245ebdf8b8bbdb783236f155c428241c40151ef5783410bd169bcc22
+binary   linux-x64/llama-server   18673680  415b95b96fb160a897f1d0b8f6193a58ebabd1003d9a849adf85c18df9bbb405
+binary   linux-x64/pocketd        7487672  964eae7f98a65837c4fe8bd725720656ea4cd583ec35e738575ecbe05056e23b
+binary   win-x64/llama-server.exe 20843807  f1b9e43fada89702d08aa8c2f5116862b533d7f23df0207e5b25283d1810d632
+binary   win-x64/pocketd.exe      7715328  890ba3c82f848dd5ae7d976979e0cd596267669822f3466c781601ad9d881dda
