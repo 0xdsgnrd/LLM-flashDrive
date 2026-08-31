@@ -1,5 +1,5 @@
 {
-  "name": "flashDrive-LLM",
+  "name": "Pocket-LLM",
   "dockerComposeFile": "../docker-compose.yml",
   "service": "dev",
   "workspaceFolder": "/work",

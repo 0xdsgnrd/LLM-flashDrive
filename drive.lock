@@ -67,7 +67,7 @@ model  unsloth/Mistral-Small-3.2-24B-Instruct-2506-GGUF  b750ec2299225e492f1bd27
 # Pinning these by hash is what lets verify-drive.sh check the Linux and
 # Windows binaries at all: it has only ever been able to run --version against
 # the host's own, and a binary you cannot execute you cannot interrogate.
-release  v1.0.0  0xdsgnrd/flashDrive-LLM
+release  v1.0.0  0xdsgnrd/Pocket-LLM
 binary   mac-arm64/llama-server   17332144  2017853e79782bf65b8a94694f79069286a085cb020a2c6d001bd5143a49ccf0
 binary   mac-arm64/pocketd        7258576  9fbb12d0245ebdf8b8bbdb783236f155c428241c40151ef5783410bd169bcc22
 binary   linux-x64/llama-server   18673680  415b95b96fb160a897f1d0b8f6193a58ebabd1003d9a849adf85c18df9bbb405

@@ -1,4 +1,4 @@
-# flashDrive-LLM
+# Pocket-LLM
 
 A portable LLM on a USB drive. Plug it into any Mac, Windows, or Linux machine —
 double-click one file — chat with a local model. **No install, no internet, no admin rights.**
@@ -30,7 +30,10 @@ mount read-write without extra software, and a new stick is almost never
 formatted that way already.
 
 Disk Utility → select the stick → Erase → Format **ExFAT**, Scheme **Master Boot
-Record**. The volume name is irrelevant; nothing depends on it.
+Record**. Naming it `Pocket-LLM` saves typing later: `provision.sh` finds the
+stick whatever it is called, but `release.sh`, `fetch-model.sh` and
+`verify-drive.sh` default to `/Volumes/Pocket-LLM` and need `DRIVE=/Volumes/NAME`
+to look anywhere else.
 
 The command-line equivalent, checking the size reported by the first line before
 running the second — `eraseDisk` does not ask twice:
@@ -43,8 +46,8 @@ diskutil eraseDisk ExFAT POCKET MBRFormat /dev/diskN
 **2. Clone and run.**
 
 ```bash
-git clone https://github.com/0xdsgnrd/flashDrive-LLM
-cd flashDrive-LLM
+git clone https://github.com/0xdsgnrd/Pocket-LLM
+cd Pocket-LLM
 ./scripts/provision.sh
 ```
 
