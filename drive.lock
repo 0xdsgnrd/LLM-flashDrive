@@ -22,27 +22,31 @@ llama_commit  58546250cfaa1dc4a33ae6171dbe4344a96206e8
 # model  <hf-repo>  <revision-sha>  <filename>  <bytes>  <sha256>
 # embed  <hf-repo>  <revision-sha>  <filename>  <bytes>  <sha256>
 #
+# The trailing number is the smallest stick, in GB, that the file belongs on.
+# "Give me the 64 set" is then a filter — everything tagged 64 or lower — rather
+# than set arithmetic, and a drive is described by one number instead of a list.
+#
 # Identical fields; the keyword decides where the file belongs on the drive.
 # "model" goes to models/, is enumerated by the router and offered in the
 # picker. "embed" goes to embed/ and is the retrieval encoder — it answers no
 # questions, is never offered, and runs in its own server so the router can
 # never evict it to load a chat model.
 
-model  Qwen/Qwen3-8B-GGUF  7c41481f57cb95916b40956ab2f0b139b296d974  Qwen3-8B-Q4_K_M.gguf  5027783488  d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785
+model  Qwen/Qwen3-8B-GGUF  7c41481f57cb95916b40956ab2f0b139b296d974  Qwen3-8B-Q4_K_M.gguf  5027783488  d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785  64
 
-model  Qwen/Qwen3-32B-GGUF  938a7432affaec9157f883a87164e2646ae17555  Qwen3-32B-Q4_K_M.gguf  19762149024  efd971561896866f0e910cce52761ca77b1b138090c7f15fe284676d57d1f689
+model  Qwen/Qwen3-32B-GGUF  938a7432affaec9157f883a87164e2646ae17555  Qwen3-32B-Q4_K_M.gguf  19762149024  efd971561896866f0e910cce52761ca77b1b138090c7f15fe284676d57d1f689  128
 
 
-model  unsloth/gemma-4-12B-it-qat-GGUF  980b060c40a8539ac159e0501a3e0f66a6365af3  gemma-4-12B-it-qat-UD-Q4_K_XL.gguf  6716356800  90fd44e29e0d7cffeb0fd00dc73cfdab9ed0b0e95306ecf7821ea634c940c370
+model  unsloth/gemma-4-12B-it-qat-GGUF  980b060c40a8539ac159e0501a3e0f66a6365af3  gemma-4-12B-it-qat-UD-Q4_K_XL.gguf  6716356800  90fd44e29e0d7cffeb0fd00dc73cfdab9ed0b0e95306ecf7821ea634c940c370  64
 
-model  unsloth/gemma-4-26B-A4B-it-GGUF  c099eb48e663fd284577b04978a94ffccb261841  gemma-4-26B-A4B-it-UD-Q4_K_M.gguf  16947541728  f2c28b3dc4776931ac6f879e11f203dec637ea0f14267a86ec8f6165f63f293f
+model  unsloth/gemma-4-26B-A4B-it-GGUF  c099eb48e663fd284577b04978a94ffccb261841  gemma-4-26B-A4B-it-UD-Q4_K_M.gguf  16947541728  f2c28b3dc4776931ac6f879e11f203dec637ea0f14267a86ec8f6165f63f293f  128
 
-model  unsloth/DeepSeek-R1-Distill-Llama-70B-GGUF  732dd974083ea5877d7b6d788b36fe7c2e5eab36  DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf  42520396448  952ff479c48ac3ece81fb6d9a5a03bfeac215e6caac780fbe91ff8cb0e05bcf3
+model  unsloth/DeepSeek-R1-Distill-Llama-70B-GGUF  732dd974083ea5877d7b6d788b36fe7c2e5eab36  DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf  42520396448  952ff479c48ac3ece81fb6d9a5a03bfeac215e6caac780fbe91ff8cb0e05bcf3  256
 
-model  unsloth/Qwen3-4B-Instruct-2507-GGUF  a06e946bb6b655725eafa393f4a9745d460374c9  Qwen3-4B-Instruct-2507-Q4_K_M.gguf  2497281120  3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597
+model  unsloth/Qwen3-4B-Instruct-2507-GGUF  a06e946bb6b655725eafa393f4a9745d460374c9  Qwen3-4B-Instruct-2507-Q4_K_M.gguf  2497281120  3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597  64
 
-embed  unsloth/embeddinggemma-300m-GGUF  6661a6504c30d8304af13455cb4a5d4f5bc6011f  embeddinggemma-300M-Q8_0.gguf  328577056  a0f7b4e13c397a6e1b32c2de75b1f65a14c92ec524d5f674d94a4290a1c4969b
+embed  unsloth/embeddinggemma-300m-GGUF  6661a6504c30d8304af13455cb4a5d4f5bc6011f  embeddinggemma-300M-Q8_0.gguf  328577056  a0f7b4e13c397a6e1b32c2de75b1f65a14c92ec524d5f674d94a4290a1c4969b  64
 
-model  unsloth/gpt-oss-20b-GGUF  d449b42d93e1c2c7bda5312f5c25c8fb91dfa9b4  gpt-oss-20b-Q4_K_M.gguf  11624759488  c27536640e410032865dc68781d80a08b98f8db5e93575919af8ccc0568aeb4f
+model  unsloth/gpt-oss-20b-GGUF  d449b42d93e1c2c7bda5312f5c25c8fb91dfa9b4  gpt-oss-20b-Q4_K_M.gguf  11624759488  c27536640e410032865dc68781d80a08b98f8db5e93575919af8ccc0568aeb4f  64
 
-model  unsloth/Mistral-Small-3.2-24B-Instruct-2506-GGUF  b750ec2299225e492f1bd27cab88a0a595fa848f  Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf  14333922848  a3cc56310807ed0d145eaf9f018ccda9ae7ad8edb41ec870aa2454b0d4700b3c
+model  unsloth/Mistral-Small-3.2-24B-Instruct-2506-GGUF  b750ec2299225e492f1bd27cab88a0a595fa848f  Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf  14333922848  a3cc56310807ed0d145eaf9f018ccda9ae7ad8edb41ec870aa2454b0d4700b3c  64

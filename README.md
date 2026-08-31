@@ -3,6 +3,81 @@
 A portable LLM on a USB drive. Plug it into any Mac, Windows, or Linux machine —
 double-click one file — chat with a local model. **No install, no internet, no admin rights.**
 
+## Start here
+
+Three ways to arrive at this repo, and only one of them needs the rest of it.
+
+| | |
+|---|---|
+| **Handed a finished drive** | Plug it in and double-click `run-mac.command`, `run-linux.sh` or `run-windows.bat`. Nothing installs, nothing phones home, nothing is left behind on the host. |
+| **Building a drive** | [Make your own drive](#make-your-own-drive) — one command, no toolchain. |
+| **Changing the code** | [Workflow (building from source)](#workflow-building-from-source). |
+
+Everything between here and there is why it is built this way, not how to use it.
+
+## Make your own drive
+
+Requires a Mac, a stick of 64GB or more, and patience with the connection.
+Docker, cmake, Go and Xcode are not needed — `git`, `curl` and `python3` ship
+with macOS and are the entire dependency list.
+
+Building a drive is macOS-only, because finding and ejecting a removable volume
+goes through `diskutil`. Running a finished drive works on all three platforms,
+which is the part that matters.
+
+**1. Format the stick as exFAT.** It is the only filesystem all three platforms
+mount read-write without extra software, and a new stick is almost never
+formatted that way already.
+
+Disk Utility → select the stick → Erase → Format **ExFAT**, Scheme **Master Boot
+Record**. The volume name is irrelevant; nothing depends on it.
+
+The command-line equivalent, checking the size reported by the first line before
+running the second — `eraseDisk` does not ask twice:
+
+```bash
+diskutil list external physical
+diskutil eraseDisk ExFAT POCKET MBRFormat /dev/diskN
+```
+
+**2. Clone and run.**
+
+```bash
+git clone https://github.com/0xdsgnrd/flashDrive-LLM
+cd flashDrive-LLM
+./scripts/provision.sh
+```
+
+That is the whole install. The stick is found, its format checked, its capacity
+read, the largest set of models that fits selected, downloaded, verified and
+ejected. `--plan` prints the intent and changes nothing.
+
+**3. Wait.** The models are the download — 38GB for a 64GB stick, 112GB for a
+256GB one. An hour at best, an afternoon at worst. It streams to the stick and
+never touches the internal disk.
+
+Stopping it is safe, and so is unplugging mid-download. Re-running resumes,
+because what is still missing is worked out from the drive rather than
+remembered.
+
+**4. Plug it into anything** and double-click the launcher for that platform.
+
+### Before a drive changes hands
+
+```bash
+/Volumes/NAME/verify-drive.sh --sha
+```
+
+Provisioning proves file sizes as it goes; this proves the bytes. Worth one run,
+because exFAT has no journal and an interrupted write can leave a file at exactly
+the right length with the wrong contents inside it.
+
+### Licences on the weights
+
+Qwen, gpt-oss and Mistral Small are Apache-2.0. Gemma carries Google's own terms
+and DeepSeek its own. Handing out drives is redistribution, and the licences are
+worth ten minutes before that becomes a habit.
+
 ## Docker is the compiler, not the runtime
 
 Linux and Windows binaries can't be built on a Mac, and the Linux one has to link
@@ -316,11 +391,94 @@ repo (internal SSD — never develop on exFAT)
 │   ├── fetch-model.sh      pull GGUFs straight to the drive (--embed for the encoder)
 │   ├── devserver.mjs       static server + API proxy
 │   ├── verify-drive.sh     check the drive against drive.lock
+│   ├── release-binaries.sh build all six, publish a release, pin their sha256
+│   ├── provision.sh        blank stick → finished drive, no toolchain needed
 │   └── release.sh          stage everything → /Volumes/Pocket-LLM
 └── dist/                   build outputs (gitignored)
 ```
 
-## Workflow
+## How provisioning works
+
+The workflow splits at a seam, and the two halves have completely different
+requirements:
+
+```bash
+# MAINTAINERS ONLY — once per code change.
+# Needs a Mac (Metal, codesigning), Docker, and push access to the repo.
+./scripts/release-binaries.sh v1.0.0
+
+# EVERYONE — once per stick. Needs curl and bandwidth, nothing else.
+./scripts/provision.sh
+```
+
+**If you are making a drive for yourself, you only ever run the second one.**
+The binaries are already published; `release-binaries.sh` would try to create a
+release in a repo you cannot write to. It exists for whoever maintains a fork —
+and if you do publish your own, it re-pins `drive.lock` to your repo, so your
+users fetch your binaries rather than someone else's.
+
+That split is the entire design. Before it, a drive cost cmake, Docker and a
+Mac. Now it costs bandwidth.
+
+`provision.sh` finds the external drive itself, refuses to guess when two are
+mounted, reads the capacity, picks the largest profile that fits, fetches the
+binaries from the pinned release and the models from Hugging Face, verifies
+everything and ejects.
+
+**It is a convergence loop, not a sequence of steps.** Every run asks the drive
+what it is still missing and fixes that; nothing assumes a clean start. So there
+is no resume logic to get wrong — interrupt it, unplug the stick, re-run it, and
+it continues, because "where it stopped" is derived from the drive rather than
+remembered. A 111GB profile over a throttled connection is several hours, and a
+process you cannot safely kill is a process you cannot walk away from.
+
+### Profiles
+
+Named after the stick you are holding, because that is the decision you are
+actually making. Each model is tagged in `drive.lock` with the smallest drive it
+belongs on, so "the 64 set" is a filter rather than set arithmetic.
+
+| profile | adds | total | covers |
+|---|---|---|---|
+| **64** | encoder, Qwen3-4B, Qwen3-8B, Gemma-12B, gpt-oss-20b, Mistral-24B | 37.7 GiB | 8 / 16 / 32GB laptops |
+| **128** | + Gemma-26B-A4B, Qwen3-32B | 71.9 GiB | + more choice at 32GB |
+| **256** | + DeepSeek-R1-70B | 111.5 GiB | + 64GB workstations |
+
+The 64 profile drops only models that need 32GB+ of host RAM anyway, so a cheap
+stick loses far less than its size suggests. Room is reserved on every profile
+for conversations, documents and the vector cache — a drive filled to the brim
+is a drive that fails the first time somebody uses it.
+
+### What it will not do
+
+- **Format anything.** The stick must already be exFAT, the one filesystem
+  macOS, Windows and Linux all mount read-write. FAT32 is rejected *by name*,
+  because its 4GB per-file limit fails on every model here and the error you
+  would otherwise get is about a failed write, not about the filesystem.
+- **Choose between two drives.** One external volume is used; two is an error
+  that lists them. Nothing should guess which disk gets 100GB written to it.
+- **Delete anything.** Models on the drive that are outside the chosen profile
+  are reported with their sizes so you can remove them yourself. Freeing 40GB is
+  not a call a script should make on its own.
+
+### Binaries are pinned like models
+
+`release-binaries.sh` builds all six, publishes them to a GitHub release, and
+writes their sha256 into `drive.lock`. Provisioning verifies each one before
+staging it, so a binary is never trusted on the strength of the URL it came
+from.
+
+That also fixes something this project has admitted for its whole life: the
+verifier could only ever run `--version` against the host's own binary, and
+took the Linux and Windows ones on faith. A hash needs no CPU that understands
+the file, so `verify-drive.sh --sha` now checks all six.
+
+Release assets share one flat namespace and three of these files are called
+`llama-server`, so each asset is named for its path with the separator swapped —
+`mac-arm64-llama-server`. Derivable in both directions, so the lock needs no
+column to remember it.
+
+## Workflow (building from source)
 
 ```bash
 # 1. build for each platform you want to support

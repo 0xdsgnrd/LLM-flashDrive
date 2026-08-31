@@ -91,25 +91,48 @@ for f in "$DRIVE"/models/*.gguf "$DRIVE"/embed/*.gguf; do
 done
 
 # ---- binaries ---------------------------------------------------------
+# Verified by sha256 when release-binaries.sh has pinned them. That is the only
+# way the Linux and Windows binaries can be checked at all: this script can run
+# --version against the host's own, but a binary it cannot execute it cannot
+# interrogate, and for most of this project's life those two were taken on
+# faith. A hash needs no CPU that understands the file.
 echo
-for p in mac-arm64 linux-x64 win-x64; do
-  b="$DRIVE/bin/$p/llama-server"; [ "$p" = win-x64 ] && b="$b.exe"
-  if [ -f "$b" ]; then printf '  ✓  bin/%-42s %s\n' "$p" "$(fsize "$b" | awk '{printf "%.0fMB", $1/1048576}')"
-  else printf '  ·  bin/%-42s missing\n' "$p"; fi
-done
-
-# pocketd is what writes conversations to the drive. Missing it is not a
-# corruption, but it silently downgrades that platform to no history at all,
-# which is worth saying out loud rather than discovering mid-session.
-for p in mac-arm64 linux-x64 win-x64; do
-  h="$DRIVE/bin/$p/pocketd"; [ "$p" = win-x64 ] && h="$h.exe"
-  if [ -f "$h" ]; then
-    printf '  ✓  bin/%s/pocketd%*s%s\n' "$p" $((30 - ${#p})) "" \
-      "$(fsize "$h" | awk '{printf "%.0fMB", $1/1048576}')"
-  else
-    printf '  ·  bin/%s/pocketd%*s%s\n' "$p" $((30 - ${#p})) "" "missing — history OFF there"
-  fi
-done
+PINNED_BINS=$(awk '$1=="binary"' "$LOCK" | wc -l | tr -d ' ')
+if [ "$PINNED_BINS" -gt 0 ]; then
+  while read -r path want sha; do
+    f="$DRIVE/bin/$path"
+    if [ ! -f "$f" ]; then
+      printf '  ·  bin/%-42s missing\n' "$path"; MISSING=$((MISSING+1)); continue
+    fi
+    have=$(fsize "$f")
+    if [ "$have" != "$want" ]; then
+      printf '  ✗  bin/%-42s WRONG SIZE  %s vs %s\n' "$path" "$have" "$want"
+      BAD=$((BAD+1)); FAIL=1; continue
+    fi
+    if [ $CHECK_SHA -eq 1 ]; then
+      got=$(sha256 "$f")
+      if [ "$got" = "UNAVAILABLE" ]; then printf '  ?  bin/%-42s size ok — no sha256 tool\n' "$path"
+      elif [ "$got" != "$sha" ]; then
+        printf '  ✗  bin/%-42s SHA MISMATCH — right size, wrong bytes\n' "$path"
+        BAD=$((BAD+1)); FAIL=1; continue
+      else printf '  ✓  bin/%-42s size + sha256\n' "$path"; fi
+    else
+      printf '  ✓  bin/%-42s %s\n' "$path" "$(echo "$have" | awk '{printf "%.0fMB", $1/1048576}')"
+    fi
+  done < <(awk '$1=="binary"{print $2, $3, $4}' "$LOCK")
+else
+  # No release pinned yet: fall back to presence only, which is all this could
+  # ever report before binaries were published as artifacts.
+  for p in mac-arm64 linux-x64 win-x64; do
+    for n in llama-server pocketd; do
+      f="$n"; [ "$p" = win-x64 ] && f="$n.exe"
+      b="$DRIVE/bin/$p/$f"
+      if [ -f "$b" ]; then printf '  ✓  bin/%-42s %s\n' "$p/$f" "$(fsize "$b" | awk '{printf "%.0fMB", $1/1048576}')"
+      else printf '  ·  bin/%-42s missing\n' "$p/$f"; fi
+    done
+  done
+  printf '  ·  binaries are not pinned — run scripts/release-binaries.sh to hash them\n'
+fi
 
 # Anyone about to lend this drive needs to know whether their conversations are
 # still on it. Titles are never printed — the count is the whole point.
@@ -161,6 +184,29 @@ if [ -n "$WANT_COMMIT" ] && [ -n "$HOST_BIN" ] && [ -x "$HOST_BIN" ]; then
       "$got"*) printf '  ✓  host binary built from pinned commit %s\n' "$got" ;;
       *)       printf '  ✗  host binary commit %s != pinned %s\n' "$got" "${WANT_COMMIT:0:12}"; FAIL=1 ;;
     esac
+  fi
+fi
+
+# ---- which profile is actually on this drive --------------------------
+# A partial drive is legitimate — you may deliberately carry only the small set —
+# so this reports what the drive IS rather than judging it against the largest
+# profile the lock happens to describe.
+PROFILES=$(awk '($1=="model"||$1=="embed"){print $7}' "$LOCK" | grep -E '^[0-9]+$' | sort -n | uniq)
+if [ -n "$PROFILES" ]; then
+  SATISFIED=""
+  for p in $PROFILES; do
+    ok=1
+    while read -r kind name; do
+      d=models; [ "$kind" = embed ] && d=embed
+      [ -f "$DRIVE/$d/$name" ] || { ok=0; break; }
+    done < <(awk -v p="$p" '($1=="model"||$1=="embed") && $7<=p {print $1, $4}' "$LOCK")
+    [ "$ok" -eq 1 ] && SATISFIED="$p"
+  done
+  echo
+  if [ -n "$SATISFIED" ]; then
+    printf '  ✓  profile  %s — complete\n' "$SATISFIED"
+  else
+    printf '  ·  profile  none complete yet (smallest is %s)\n' "$(echo $PROFILES | awk '{print $1}')"
   fi
 fi
 
